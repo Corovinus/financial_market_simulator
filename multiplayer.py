@@ -95,11 +95,11 @@ def parser():
     for command in (admin, host):
         command.add_argument('--bind', default='0.0.0.0')
         command.add_argument('--port', type=int, default=DEFAULT_PORT)
-        command.add_argument('--scale', type=float, default=1.0)
+        command.add_argument('--scale', type=float, default=1.25)
         if command is admin:
             command.add_argument('--seed', type=int)
     join.add_argument('--port', type=int, default=DEFAULT_PORT)
-    join.add_argument('--scale', type=float, default=1.0)
+    join.add_argument('--scale', type=float, default=1.25)
     return result
 
 

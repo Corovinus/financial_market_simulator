@@ -17,7 +17,7 @@ from .educational import (
     risk_premium_bound,
 )
 from .display import open_scaled_display, present_scaled
-from .document import document_lines, is_formula, pretty_formula
+from .document import document_lines, draw_document_line
 from .theme import COLORS, card, font, label as draw_label, mouse_position, rounded
 
 
@@ -193,6 +193,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
     small_font = font(pg, 14)
     title_font = font(pg, 27, bold=True)
     formula_font = font(pg, 14)
+    table_font = pg.font.SysFont('consolas', 12)
     manual = []
     manual_path = ROOT / "data/converted/manual_sections.json"
     if manual_path.exists():
@@ -243,15 +244,14 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
         write(purpose, 50, 86, COLORS['muted'], small_font)
         if mode == "manual":
             card(pg, screen, pg.Rect(36, 116, 888, 420), COLORS['panel'], COLORS['border'])
-            for index, line in enumerate(manual[scroll:scroll + 24]):
-                y = 134 + index * 16
-                shown = pretty_formula(line)[:104]
-                if is_formula(line):
-                    rounded(pg, screen, pg.Rect(50, y - 1, 856, 16),
-                            COLORS['background_alt'], 4)
-                    write(shown, 62, y, COLORS['accent_alt'], formula_font)
-                else:
-                    write(shown, 58, y, COLORS['text'], small_font)
+            y = 130
+            for line in manual[scroll:]:
+                height = draw_document_line(
+                    pg, screen, line, pg.Rect(50, y, 856, 44), small_font,
+                    formula_font, table_font, COLORS)
+                y += height
+                if y > 520:
+                    break
             footer = "↑↓/PgUp/PgDn текст   Esc расчёт   Q выход"
         else:
             card(pg, screen, pg.Rect(36, 116, 410, 350), COLORS['panel'], COLORS['border'])
@@ -332,7 +332,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
                         running = False
                 elif mode == "manual":
                     if key in (pg.K_DOWN, pg.K_PAGEDOWN):
-                        scroll = min(max(0, len(manual) - 24), scroll + (10 if key == pg.K_PAGEDOWN else 1))
+                        scroll = min(max(0, len(manual) - 1), scroll + (10 if key == pg.K_PAGEDOWN else 1))
                     elif key in (pg.K_UP, pg.K_PAGEUP):
                         scroll = max(0, scroll - (10 if key == pg.K_PAGEUP else 1))
                     elif key == pg.K_HOME:

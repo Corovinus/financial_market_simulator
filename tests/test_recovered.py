@@ -12,7 +12,10 @@ from market.robots import RobotController
 from modules.educational import (
     binomial_option, capm_statistics, macaulay_duration, risk_premium_bound,
 )
-from modules.document import document_lines, is_formula, pretty_formula, table_of_contents
+from modules.document import (
+    Fraction, document_lines, is_formula, line_text,
+    pretty_formula, table_of_contents,
+)
 from market.levels import CUSTOM_LEVELS, CustomLevel, add_level
 from main import build_groups, wrapped_index
 
@@ -32,7 +35,29 @@ class OriginalCases(unittest.TestCase):
         formula = pretty_formula('u = exp(2.40/sqrt(12)); sigma^2 * Delta t')
         self.assertEqual(formula, 'u = exp(2.40/√(12)); σ² · Δt')
         self.assertTrue(is_formula(formula))
-        self.assertNotIn('│', ''.join(document_lines('│ текст │')))
+        self.assertTrue(is_formula('Стоимость = Цена · Количество'))
+        self.assertFalse(is_formula('Time = 0'))
+        self.assertNotIn('│', ''.join(map(line_text,
+                                         document_lines('│ текст │'))))
+        table = document_lines('┌───┬───┐\n│ A │ B │\n└───┴───┘')
+        self.assertEqual([line.kind for line in table], ['table'])
+        unboxed = document_lines('Деньги    Очки    Приращение\n0         0       0')
+        self.assertEqual([line.kind for line in unboxed],
+                         ['table_header', 'table'])
+
+        formulas = [line for text in sections.values()
+                    for line in document_lines(text)
+                    if line.kind == 'formula']
+        self.assertTrue(any(any(isinstance(part, Fraction)
+                                 for part in line.parts)
+                            for line in formulas))
+        for line in formulas:
+            for part in line.parts:
+                if isinstance(part, Fraction):
+                    self.assertNotIn('/', part.numerator)
+                    self.assertNotIn('/', part.denominator)
+                else:
+                    self.assertNotIn('/', part)
 
     def test_dos_no_trade_results(self):
         for filename in ('b01_no_trades.json', 'b02_no_trades.json'):

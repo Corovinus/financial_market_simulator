@@ -36,7 +36,9 @@ def present_scaled(pygame, canvas, window):
     if scaled_size == canvas.get_size():
         scaled = canvas
     else:
-        scaled = pygame.transform.scale(canvas, scaled_size)
+        # Bilinear scaling keeps text and vector UI edges clean on high-DPI
+        # screens and at non-integer window scales.
+        scaled = pygame.transform.smoothscale(canvas, scaled_size)
     offset = ((target_width - scaled_size[0]) // 2, (target_height - scaled_size[1]) // 2)
     window.blit(scaled, offset)
     pygame.display.flip()

@@ -7,7 +7,7 @@ from pathlib import Path
 import sys
 
 from market.levels import CUSTOM_LEVELS
-from modules.document import document_lines, is_formula, pretty_formula, table_of_contents
+from modules.document import document_lines, draw_document_line, table_of_contents
 from modules.display import open_scaled_display, present_scaled
 from modules.theme import COLORS, card, font, label, mouse_position, rounded
 
@@ -61,7 +61,7 @@ def main():
     parser.add_argument('--screenshot', type=Path, help='Save the initial menu and exit (SDL dummy supported).')
     parser.add_argument('--speed', type=float, default=1.0,
                         help='Scale BIDASK decisecond time (1 is original pace).')
-    parser.add_argument('--scale', type=float, default=1.0,
+    parser.add_argument('--scale', type=float, default=1.25,
                         help='Initial window scale (0.5..5); the window can also be resized.')
     args = parser.parse_args()
     import pygame as pg
@@ -72,9 +72,10 @@ def main():
     heading = None
     formula = None
     document_heading = None
+    table_font = None
 
     def reset_display():
-        nonlocal screen, window, typeface, small, heading, formula, document_heading
+        nonlocal screen, window, typeface, small, heading, formula, document_heading, table_font
         pg.init()
         screen, window = open_scaled_display(pg, (960, 600), args.scale,
                                               'FAST — исследовательская версия')
@@ -83,6 +84,7 @@ def main():
         heading = font(pg, 30, bold=True)
         formula = font(pg, 15)
         document_heading = font(pg, 22, bold=True)
+        table_font = pg.font.SysFont('consolas', 12)
 
     reset_display()
     sections = json.loads((ROOT / 'data/converted/manual_sections.json').read_text(encoding='utf-8'))
@@ -113,7 +115,7 @@ def main():
         return [pg.Rect(306, 282 + index * 58, 600, 44) for index in range(2)]
 
     def reader_limit():
-        return max(0, len(lines) - 1 - reader_page_size)
+        return max(0, len(lines) - 2)
 
     def description_lines(label_value, prefix):
         """Return a valid reader page even for a custom level."""
@@ -422,15 +424,14 @@ def main():
             text((lines[0] if lines else 'Документ')[:58], 306, 130,
                  COLORS['text'], document_heading)
             text('PgUp/PgDn или колёсико — прокрутка', 308, 166, COLORS['muted'], small)
-            for index, value in enumerate(lines[1 + scroll:1 + scroll + reader_page_size]):
-                shown = pretty_formula(value)[horizontal:horizontal + 86]
-                y = 196 + index * 20
-                if is_formula(value):
-                    rounded(pg, screen, pg.Rect(302, y - 2, 620, 19),
-                            COLORS['background_alt'], 5)
-                    text(shown, 316, y, COLORS['accent_alt'], formula)
-                else:
-                    text(shown, 308, y, COLORS['text'], small)
+            y = 194
+            for value in lines[1 + scroll:]:
+                height = draw_document_line(
+                    pg, screen, value, pg.Rect(302, y, 620, 44),
+                    small, formula, table_font, COLORS)
+                y += height
+                if y > 520:
+                    break
         elif mode == 'toc':
             text('Оглавление', 306, 126, COLORS['text'], heading)
             text('Выберите статью: ↑ ↓, Enter или клик мышью',
