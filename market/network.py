@@ -13,6 +13,7 @@ import time
 from .config import Scenario
 from .calculations import bond_value, future_capital
 from .engine import Market
+from .goals import evaluate_goals
 from .orderbook import OrderError
 from .report import build_report
 from .robots import RobotController
@@ -249,6 +250,7 @@ class GameSession:
                 'rates': self.scenario.rates,
                 'payments': self.scenario.payments,
                 'hints': self.scenario.hints,
+                'goal_count': len(self.scenario.goals),
                 'fair_values': self._fair_values,
             }
 
@@ -271,6 +273,11 @@ class GameSession:
                      for index in range(len(self.market.portfolios))}
             return build_report(self.scenario, self.market.replay_frames,
                                 actor, names)
+
+    def goal_progress(self, actor):
+        with self._lock:
+            return evaluate_goals(self.scenario, self.market.replay_frames,
+                                  actor)
 
     def _calculate_fair_values(self):
         return tuple(bond_value(self.scenario, instrument, self.period)
@@ -329,6 +336,11 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                         report_actor = request.get('actor') if is_admin else actor
                         report = self.server.session.final_report(report_actor)
                         self._send({'ok': True, 'report': report})
+                        continue
+                    elif kind == 'goals':
+                        goal_actor = request.get('actor') if is_admin else actor
+                        progress = self.server.session.goal_progress(goal_actor)
+                        self._send({'ok': True, 'goals': progress})
                         continue
                     elif kind == 'trade':
                         if actor is None:

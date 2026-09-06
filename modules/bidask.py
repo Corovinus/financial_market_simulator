@@ -10,10 +10,12 @@ import time
 from market.calculations import bond_value
 from market.config import parse_offer, read_par, Scenario
 from market.engine import Market
+from market.goals import evaluate_goals
 from market.orderbook import OrderError
 from market.report import build_report, default_report_folder, export_report
 from market.robots import RobotController
 from .display import open_scaled_display, present_scaled
+from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
 from .theme import COLORS, card, font, label, mouse_position, rounded
@@ -69,6 +71,10 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     report_actor = 0
     report_instrument = 0
     report_notice = ''
+    goals_data = None
+    goals_actor = 0
+    goals_selected = 0
+    final_goals = None
     running = True
     clock = pg.time.Clock()
 
@@ -97,6 +103,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     sell_button = pg.Rect(804, 482, 132, 38)
 
     def draw():
+        if goals_data is not None:
+            player_name = ('Игрок' if goals_actor == 0 else
+                           f'Робот {goals_actor + 1}')
+            draw_goals(pg, screen, goals_data, player_name, goals_selected,
+                       (body_font, small_font, title_font))
+            return
         if report_data is not None:
             draw_report(pg, screen, report_data, report_instrument,
                         (body_font, small_font, title_font), report_notice)
@@ -115,6 +127,9 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write('Торговая сессия', 48, 30, COLORS['accent'], title_font)
         write('BID / ASK', 288, 38, COLORS['muted'], small_font)
+        if scenario.goals:
+            write(f'F4 · цели ({len(scenario.goals)})', 390, 38,
+                  COLORS['accent_alt'], small_font)
         write(f'Период {period + 1} / {scenario.periods}', 660, 34, COLORS['text'], body_font)
         write(f'{max(0, int(remaining / 10))} сек.', 820, 34, COLORS['warning'], body_font)
         pg.draw.rect(screen, COLORS['background_alt'], (48, 84, 580, 8), border_radius=4)
@@ -166,6 +181,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             write(f'Будущий капитал: {projected:.2f}', 210, 304, COLORS['accent_alt'], body_font)
             if period + 1 == scenario.periods:
                 write(f'Очки: {market.score(projected):.2f}', 210, 340, COLORS['warning'], body_font)
+                if final_goals is not None:
+                    goal_text = ('Цели выполнены' if final_goals['all_passed']
+                                 else 'Есть невыполненные цели')
+                    write(goal_text, 210, 374,
+                          COLORS['buy'] if final_goals['all_passed'] else
+                          COLORS['sell'], small_font)
         action_text = ('Enter — следующий период   Esc — выход' if period + 1 < scenario.periods
                        else 'Enter — завершить попытку   Esc — выход')
         write(action_text, 54, 494, COLORS['muted'], small_font)
@@ -194,7 +215,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
 
     while running:
         elapsed = clock.tick(60) / 1000.0
-        if not result_screen and input_mode is None:
+        if not result_screen and input_mode is None and goals_data is None:
             elapsed_ticks = min(remaining, elapsed * 10.0 * float(speed))
             remaining -= elapsed_ticks
             for robot_event in robots.step(elapsed_ticks):
@@ -210,6 +231,9 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if remaining <= 0:
                 projected = market.finish_period()
                 result_screen = True
+                if period + 1 == scenario.periods and scenario.goals:
+                    final_goals = evaluate_goals(
+                        scenario, market.replay_frames, 0)
                 message(f'Период завершён. Будущий капитал: {projected:.2f}', 30)
         for event in pg.event.get():
             if event.type == pg.QUIT:
@@ -232,6 +256,21 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if goals_data is not None:
+                if key in (pg.K_ESCAPE, pg.K_F4):
+                    goals_data = None
+                elif key == pg.K_UP:
+                    goals_selected = ((goals_selected - 1) %
+                                      len(goals_data['items']))
+                elif key == pg.K_DOWN:
+                    goals_selected = ((goals_selected + 1) %
+                                      len(goals_data['items']))
+                elif key == pg.K_TAB:
+                    goals_actor = ((goals_actor + 1) %
+                                   len(market.portfolios))
+                    goals_data = evaluate_goals(
+                        scenario, market.replay_frames, goals_actor)
+                continue
             if report_data is not None:
                 if key == pg.K_ESCAPE:
                     report_data = None
@@ -271,6 +310,10 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 elif key == pg.K_TAB:
                     replay_observed = ((replay_observed + 1) %
                                        len(market.portfolios))
+                continue
+            if key == pg.K_F4 and scenario.goals:
+                goals_data = evaluate_goals(
+                    scenario, market.replay_frames, goals_actor)
                 continue
             if result_screen:
                 if key in (pg.K_ESCAPE, pg.K_e):

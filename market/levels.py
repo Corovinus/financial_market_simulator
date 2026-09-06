@@ -8,7 +8,7 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 
-from .config import Scenario
+from .config import Goal, Scenario
 
 
 @dataclass(frozen=True)
@@ -35,6 +35,7 @@ CUSTOM_LEVELS = [
             reaction_ticks=30,
             strategy=1,
             hints=True,
+            goals=(Goal('trades', 1, title='Совершите хотя бы одну сделку'),),
         ),
     ),
 ]

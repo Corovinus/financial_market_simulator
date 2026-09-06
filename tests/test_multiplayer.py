@@ -4,7 +4,7 @@ import socket
 import unittest
 from unittest.mock import patch
 
-from market.config import Scenario, read_par
+from market.config import Goal, Scenario, read_par
 from market.generator import generate_scenario
 from market.network import (
     GameSession, LanClient, LanServer, discover_games, parse_endpoint,
@@ -92,6 +92,8 @@ class MultiplayerTests(unittest.TestCase):
         self.assertEqual((first.periods, len(first.names)), (3, 3))
         self.assertTrue(all(payment[-1] > 0 for payment in first.payments))
         self.assertGreater(first.score_parameters[2], first.cash)
+        self.assertEqual([goal.kind for goal in first.goals],
+                         ['trades', 'profit'])
 
     def test_session_separates_people_from_robots(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
@@ -197,7 +199,8 @@ class MultiplayerTests(unittest.TestCase):
             periods=1, duration_ticks=10, rates=(10,), names=('Бумага',),
             payments=((150,),), cash=1000, positions=(0,),
             score_parameters=(0, 0, 2000, 10), queue=True, robots=1,
-            wolves=0, reaction_ticks=10, strategy=0, hints=True)
+            wolves=0, reaction_ticks=10, strategy=0, hints=True,
+            goals=(Goal('trades', 1),))
         server = LanServer(scenario, host='127.0.0.1', port=0,
                            human_slots=2, bots=0, discovery=False).start()
         admin = buyer = seller = None
@@ -217,9 +220,16 @@ class MultiplayerTests(unittest.TestCase):
                 {'type': 'report', 'actor': seller.actor})['report']
             player_report = buyer.request(
                 {'type': 'report', 'actor': seller.actor})['report']
+            teacher_goals = admin.request(
+                {'type': 'goals', 'actor': seller.actor})['goals']
+            player_goals = buyer.request(
+                {'type': 'goals', 'actor': seller.actor})['goals']
             self.assertEqual(teacher_report['actor'], seller.actor)
             self.assertEqual(player_report['actor'], buyer.actor)
             self.assertEqual(player_report['name'], 'Покупатель')
+            self.assertEqual(teacher_goals['actor'], seller.actor)
+            self.assertEqual(player_goals['actor'], buyer.actor)
+            self.assertTrue(player_goals['all_passed'])
         finally:
             for client in (seller, buyer, admin):
                 if client is not None:

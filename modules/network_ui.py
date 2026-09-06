@@ -6,6 +6,7 @@ import time
 from market.config import parse_offer
 from market.report import default_report_folder, export_report
 from .display import open_scaled_display, present_scaled
+from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
 from .theme import COLORS, card, font, label, rounded
@@ -42,6 +43,11 @@ def run_network_client(client, role='player', scale=1.0,
     report_data = None
     report_instrument = 0
     report_notice = ''
+    goals_data = None
+    goals_open = False
+    goals_selected = 0
+    goals_actor = client.actor or 0
+    last_goal_refresh = 0.0
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -78,6 +84,8 @@ def run_network_client(client, role='player', scale=1.0,
                     updates.put(('replay', response['replay']))
                 elif 'report' in response:
                     updates.put(('report', response['report']))
+                elif 'goals' in response:
+                    updates.put(('goals', response['goals']))
             except ValueError as error:
                 updates.put(('error', str(error)))
             except (OSError, ConnectionError) as error:
@@ -94,6 +102,12 @@ def run_network_client(client, role='player', scale=1.0,
 
     def draw(state):
         nonlocal observed
+        if goals_open and goals_data is not None:
+            goal_actor = goals_data['actor']
+            draw_goals(
+                pg, screen, goals_data, owner_name(state, goal_actor),
+                goals_selected, (body, small, title), can_switch=is_admin)
+            return
         if report_data is not None:
             draw_report(pg, screen, report_data, report_instrument,
                         (body, small, title), report_notice,
@@ -117,6 +131,9 @@ def run_network_client(client, role='player', scale=1.0,
               COLORS['warning'], body)
         write(room_label, 760, 58, COLORS['muted'], small)
         write(f'Seed {state["seed"]}', 570, 42, COLORS['muted'], small)
+        if state.get('goal_count'):
+            write(f'F4 · цели ({state["goal_count"]})', 390, 42,
+                  COLORS['accent_alt'], small)
 
         if state['phase'] == 'lobby':
             card(pg, screen, pg.Rect(36, 104, 888, 410),
@@ -231,6 +248,9 @@ def run_network_client(client, role='player', scale=1.0,
                 if state['period'] + 1 == state['periods']:
                     write('F2 — итоговый отчёт', 430, 362,
                           COLORS['accent_alt'], small)
+                if state.get('goal_count'):
+                    write('F4 — учебные цели', 430, 340,
+                          COLORS['accent_alt'], small)
 
         rounded(pg, screen, pg.Rect(24, 530, 912, 52), COLORS['panel'], 10)
         if input_mode:
@@ -264,6 +284,9 @@ def run_network_client(client, role='player', scale=1.0,
             elif update == 'report':
                 report_data = value
                 report_notice = ''
+            elif update == 'goals':
+                if goals_open:
+                    goals_data = value
             elif update == 'error':
                 message(value, 5)
             else:
@@ -276,6 +299,26 @@ def run_network_client(client, role='player', scale=1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if goals_open and goals_data is None:
+                if key in (pg.K_ESCAPE, pg.K_F4):
+                    goals_open = False
+                continue
+            if goals_open and goals_data is not None:
+                if key in (pg.K_ESCAPE, pg.K_F4):
+                    goals_open = False
+                    goals_data = None
+                elif key == pg.K_UP:
+                    goals_selected = ((goals_selected - 1) %
+                                      len(goals_data['items']))
+                elif key == pg.K_DOWN:
+                    goals_selected = ((goals_selected + 1) %
+                                      len(goals_data['items']))
+                elif key == pg.K_TAB and is_admin:
+                    actors = sorted(int(value) for value in state['players'])
+                    current = goals_data['actor']
+                    goals_actor = actors[(actors.index(current) + 1) % len(actors)]
+                    send({'type': 'goals', 'actor': goals_actor})
+                continue
             if report_data is not None:
                 if key == pg.K_ESCAPE:
                     report_data = None
@@ -340,6 +383,10 @@ def run_network_client(client, role='player', scale=1.0,
                 continue
             if key == pg.K_ESCAPE:
                 running = False
+            elif key == pg.K_F4 and state.get('goal_count'):
+                goals_actor = observed if is_admin else client.actor
+                goals_open = True
+                send({'type': 'goals', 'actor': goals_actor})
             elif (key == pg.K_r and is_admin and
                   state['phase'] in ('running', 'paused', 'result', 'finished')):
                 send({'type': 'replay', 'index': -1})
@@ -373,6 +420,10 @@ def run_network_client(client, role='player', scale=1.0,
                     show_hints = not show_hints
                 elif event.unicode and event.unicode.isdigit():
                     input_mode, input_text = 'quote', event.unicode
+        if (goals_open and goals_data is not None and
+                time.monotonic() - last_goal_refresh >= 0.5):
+            send({'type': 'goals', 'actor': goals_actor})
+            last_goal_refresh = time.monotonic()
         draw(state)
         present_scaled(pg, screen, window)
         clock.tick(30)

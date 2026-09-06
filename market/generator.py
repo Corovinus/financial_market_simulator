@@ -2,7 +2,7 @@
 import random
 
 from .calculations import future_capital
-from .config import Scenario
+from .config import Goal, Scenario
 
 
 def generate_scenario(seed: int, difficulty: str = 'normal') -> Scenario:
@@ -35,4 +35,10 @@ def generate_scenario(seed: int, difficulty: str = 'normal') -> Scenario:
     baseline = future_capital(temporary, cash, positions)
     upper = max(1000, round(baseline * 1.8 / 100) * 100)
     return Scenario(**{**temporary.__dict__,
-                       'score_parameters': (0, 0, upper, 6)})
+                       'score_parameters': (0, 0, upper, 6),
+                       'goals': (
+                           Goal('trades', {'easy': 1, 'normal': 2, 'hard': 3}[difficulty],
+                                title='Совершите несколько сделок'),
+                           Goal('profit', 0,
+                                title='Не уступите стратегии без торговли'),
+                       )})

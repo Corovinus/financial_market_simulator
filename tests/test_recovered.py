@@ -3,7 +3,8 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from market.config import Scenario, read_par, parse_offer
+from market.config import Goal, Scenario, read_par, parse_offer
+from market.goals import evaluate_goals
 from market.calculations import bond_value, settle, future_capital
 from market.rng import OriginalRNG
 from market.engine import Market
@@ -212,6 +213,41 @@ class OriginalCases(unittest.TestCase):
             csv_path, html_path = export_report(buyer, folder)
             self.assertIn('Покупатель', csv_path.read_text(encoding='utf-8-sig'))
             self.assertIn('<svg', html_path.read_text(encoding='utf-8'))
+
+    def test_trading_goals_validate_and_track_final_progress(self):
+        goals = (
+            Goal('capital', 1140), Goal('profit', 40), Goal('trades', 1),
+            Goal('position', 1, instrument=0, maximum=1),
+        )
+        scenario = Scenario(
+            periods=1, duration_ticks=10, rates=(10,), names=('Бумага',),
+            payments=((150,),), cash=1000, positions=(0,),
+            score_parameters=(0, 0, 2000, 10), queue=True, robots=1,
+            wolves=0, reaction_ticks=10, strategy=0, hints=True,
+            goals=goals)
+        market = Market(scenario)
+        market.start_period(0)
+        market.submit(0, 0, 'bid', 100, 1)
+        market.take(1, 0, 'sell', 1)
+        live = evaluate_goals(scenario, market.replay_frames, 0)
+        self.assertFalse(live['finished'])
+        self.assertTrue(live['all_passed'])
+        market.finish_period()
+        final = evaluate_goals(scenario, market.replay_frames, 0)
+        self.assertTrue(final['finished'])
+        self.assertTrue(final['all_passed'])
+        self.assertEqual([item['passed'] for item in final['items']],
+                         [True, True, True, True])
+        with self.assertRaises(ValueError):
+            Scenario(**{**scenario.__dict__,
+                        'goals': (Goal('position', 1, instrument=4),)})
+        from_mapping = Scenario(**{
+            **scenario.__dict__,
+            'goals': ({'kind': 'trades', 'target': 2,
+                       'title': 'Две сделки'},),
+        })
+        self.assertEqual(from_mapping.goals,
+                         (Goal('trades', 2, title='Две сделки'),))
 
     def test_book_without_ranked_queue_drops_superseded_quote(self):
         from market.orderbook import OrderBook

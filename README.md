@@ -194,7 +194,12 @@ python multiplayer.py join 192.168.1.25:8765 --name Студент-1
       "wolves": 1,
       "reaction_ticks": 30,
       "strategy": 1,
-      "hints": true
+      "hints": true,
+      "goals": [
+        {"kind": "trades", "target": 3, "title": "Совершите три сделки"},
+        {"kind": "profit", "target": 100},
+        {"kind": "position", "instrument": 0, "target": 8, "maximum": 12}
+      ]
     }
   }
 ]
@@ -209,7 +214,7 @@ python multiplayer.py join 192.168.1.25:8765 --name Студент-1
 Каждый объект `CustomLevel` автоматически появляется в `Свои уровни`. Например:
 
 ```python
-from market.config import Scenario
+from market.config import Goal, Scenario
 from market.levels import CUSTOM_LEVELS, CustomLevel
 
 CUSTOM_LEVELS.append(CustomLevel(
@@ -229,6 +234,11 @@ CUSTOM_LEVELS.append(CustomLevel(
         reaction_ticks=30,
         strategy=1,
         hints=True,
+        goals=(
+            Goal("trades", 3, title="Совершите три сделки"),
+            Goal("profit", 100),
+            Goal("position", 8, instrument=0, maximum=12),
+        ),
     ),
 ))
 ```
@@ -236,6 +246,19 @@ CUSTOM_LEVELS.append(CustomLevel(
 В `payments` должна быть одна строка на бумагу и по одному числу на каждый
 период. `positions` содержит начальные количества бумаг. `duration_ticks` и
 `reaction_ticks` используют десятые доли секунды, как исходный `.PAR`.
+Поле `goals` необязательно. Поддерживаются четыре типа учебных целей:
+
+- `capital` — итоговый капитал не ниже `target`;
+- `profit` — результат относительно стратегии без торговли не ниже `target`;
+- `trades` — не менее `target` исполненных сделок;
+- `position` — позиция по бумаге с индексом `instrument` не ниже `target` и,
+  если задано, не выше `maximum`.
+
+Необязательное поле `title` заменяет автоматически сформулированное условие.
+Во время сессии `F4` открывает текущий прогресс. Локальный просмотр целей
+приостанавливает таймер; в сетевой игре данные обновляются с сервера. После
+последнего периода экран показывает окончательный статус каждой цели. В быстрой
+сетевой игре автоматически создаются цели по числу сделок и результату торговли.
 Для динамического добавления уровня перед вызовом `main.main()` можно вызвать
 `market.levels.add_level("Имя", scenario)`. Пользовательский уровень использует
 тот же экран BIDASK, двойной аукцион, F9, расчёт выплат и клавишу `--speed`.

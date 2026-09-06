@@ -167,7 +167,8 @@ def main():
                     f'Длительность: {scenario.duration_ticks / 10:g} сек.',
                     'Инструменты: ' + ', '.join(scenario.names),
                     f'Начальные деньги: {scenario.cash:g}',
-                    'Начальные позиции: ' + ', '.join(map(str, scenario.positions))]
+                    'Начальные позиции: ' + ', '.join(map(str, scenario.positions)),
+                    f'Учебных целей: {len(scenario.goals)}']
         return [label_value, '', 'Описание для этого раздела пока недоступно.']
 
     def enter_section():

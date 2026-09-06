@@ -6,6 +6,38 @@ import re
 
 
 @dataclass(frozen=True)
+class Goal:
+    kind: str
+    target: float
+    instrument: int | None = None
+    maximum: float | None = None
+    title: str = ''
+
+    def __post_init__(self):
+        if self.kind not in ('capital', 'profit', 'trades', 'position'):
+            raise ValueError('Тип цели: capital, profit, trades или position')
+        if (not isinstance(self.target, (int, float)) or
+                not math.isfinite(self.target)):
+            raise ValueError('Целевое значение должно быть конечным числом')
+        if self.kind == 'trades' and (type(self.target) is not int or
+                                      self.target < 0):
+            raise ValueError('Число сделок должно быть целым и неотрицательным')
+        if self.kind == 'position':
+            if type(self.instrument) is not int or self.instrument < 0:
+                raise ValueError('Для позиции нужен номер бумаги')
+            if (self.maximum is not None and
+                    (not isinstance(self.maximum, (int, float)) or
+                     not math.isfinite(self.maximum) or
+                     self.maximum < self.target)):
+                raise ValueError('Неверный диапазон позиции')
+        elif self.instrument is not None or self.maximum is not None:
+            raise ValueError('Бумага и максимум применимы только к позиции')
+        if not isinstance(self.title, str):
+            raise ValueError('Название цели должно быть строкой')
+        object.__setattr__(self, 'title', self.title.strip()[:80])
+
+
+@dataclass(frozen=True)
 class Scenario:
     periods: int
     duration_ticks: int
@@ -21,15 +53,19 @@ class Scenario:
     reaction_ticks: int
     strategy: int
     hints: bool
+    goals: tuple[Goal, ...] = ()
 
     def __post_init__(self):
         """Reject malformed built-in, generated and user-authored levels early."""
         tuple_fields = ('rates', 'names', 'payments', 'positions',
-                        'score_parameters')
+                        'score_parameters', 'goals')
         for field in tuple_fields:
             object.__setattr__(self, field, tuple(getattr(self, field)))
         object.__setattr__(self, 'payments',
                            tuple(tuple(row) for row in self.payments))
+        object.__setattr__(self, 'goals', tuple(
+            goal if isinstance(goal, Goal) else Goal(**goal)
+            for goal in self.goals))
         if type(self.periods) is not int or self.periods <= 0:
             raise ValueError('Число периодов должно быть положительным')
         if type(self.duration_ticks) is not int or self.duration_ticks <= 0:
@@ -70,6 +106,9 @@ class Scenario:
             raise ValueError('Стратегия роботов должна быть 0 или 1')
         if type(self.queue) is not bool or type(self.hints) is not bool:
             raise ValueError('Очередь и подсказки должны быть True или False')
+        if any(goal.kind == 'position' and
+               goal.instrument >= len(self.names) for goal in self.goals):
+            raise ValueError('Цель ссылается на неизвестную бумагу')
 
 
 def read_par(path: str | Path) -> Scenario:
