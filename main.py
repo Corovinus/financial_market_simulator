@@ -100,6 +100,8 @@ def main():
                      for index in range(len(GROUPS))]
     open_button = pg.Rect(306, 474, 180, 42)
     back_button = pg.Rect(810, 31, 102, 34)
+    exit_yes_button = pg.Rect(308, 264, 260, 48)
+    exit_no_button = pg.Rect(588, 264, 260, 48)
     reader_page_size = 16
 
     LOGGER.info('Application started: scale=%s speed=%s groups=%s',
@@ -248,11 +250,19 @@ def main():
     def click_action(position):
         """Make the menu usable with a mouse without changing keyboard flow."""
         nonlocal group, row, mode, choice, lines, scroll, horizontal
-        nonlocal toc_index, toc_scroll, reader_back
+        nonlocal toc_index, toc_scroll, reader_back, running
         if position is None:
             return
         if mode != 'main' and back_button.collidepoint(position):
             go_back()
+            return
+        if mode == 'exit':
+            if exit_yes_button.collidepoint(position):
+                LOGGER.info('Exit confirmed via mouse')
+                running = False
+            elif exit_no_button.collidepoint(position):
+                LOGGER.info('Exit cancelled via mouse')
+                mode = 'main'
             return
         for index, rect in enumerate(sidebar_rects):
             if rect.collidepoint(position):
@@ -424,7 +434,9 @@ def main():
                     text('Добавьте уровень в market/levels.py', 308, 258, COLORS['muted'], typeface)
                 if item_count or group == len(GROUPS) - 1:
                     rounded(pg, screen, open_button, COLORS['accent'], 9)
-                    text('Выбрать  →', open_button.x + 22, open_button.y + 10,
+                    button_label = ('Подтвердить →' if group == len(GROUPS) - 1
+                                    else 'Выбрать  →')
+                    text(button_label, open_button.x + 22, open_button.y + 10,
                          COLORS['white'], typeface)
             elif mode == 'items':
                 options = [item[0] for item in GROUPS[group][1]]
@@ -477,13 +489,17 @@ def main():
         elif mode == 'exit':
             text('Завершить работу?', 306, 140, COLORS['text'], heading)
             text('Все открытые окна будут закрыты.', 308, 190, COLORS['muted'], typeface)
-            rounded(pg, screen, pg.Rect(308, 264, 260, 48), COLORS['danger'], 10)
-            text('Enter / Y — Да', 334, 277, COLORS['white'], typeface)
-            rounded(pg, screen, pg.Rect(588, 264, 260, 48), COLORS['background_alt'], 10)
-            text('Esc / N — Нет', 616, 277, COLORS['text'], typeface)
+            rounded(pg, screen, exit_yes_button, COLORS['danger'], 10)
+            text('Enter / Y — Да', exit_yes_button.x + 26,
+                 exit_yes_button.y + 13, COLORS['white'], typeface)
+            rounded(pg, screen, exit_no_button, COLORS['background_alt'], 10)
+            rounded(pg, screen, exit_no_button, COLORS['border'], 10, 1)
+            text('Esc / N — Нет', exit_no_button.x + 28,
+                 exit_no_button.y + 13, COLORS['text'], typeface)
         rounded(pg, screen, pg.Rect(24, 562, 912, 24), COLORS['panel'], 8)
         footer = ('↑ ↓ разделы    Enter / → открыть    Esc выход' if mode == 'main' else
                   '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action', 'toc') else
+                  'Enter / Y подтвердить    Esc / N отменить' if mode == 'exit' else
                   '↑ ↓ прокрутка    PgUp/PgDn страница    Esc / ← назад')
         text(footer + '    мышь поддерживается', 38, 566, COLORS['muted'], small)
         present_scaled(pg, screen, window)
