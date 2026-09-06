@@ -54,6 +54,9 @@ class Scenario:
     strategy: int
     hints: bool
     goals: tuple[Goal, ...] = ()
+    robot_style: str = 'balanced'
+    robot_value_spread: float = 0.2
+    robot_max_quantity: int = 99
 
     def __post_init__(self):
         """Reject malformed built-in, generated and user-authored levels early."""
@@ -104,6 +107,15 @@ class Scenario:
             raise ValueError('Реакция роботов должна быть положительной')
         if self.strategy not in (0, 1) or type(self.strategy) is not int:
             raise ValueError('Стратегия роботов должна быть 0 или 1')
+        if self.robot_style not in ('cautious', 'balanced', 'aggressive'):
+            raise ValueError('Стиль роботов: cautious, balanced или aggressive')
+        if (not isinstance(self.robot_value_spread, (int, float)) or
+                not math.isfinite(self.robot_value_spread) or
+                not 0 <= self.robot_value_spread <= 0.5):
+            raise ValueError('Разброс оценки роботов должен быть от 0 до 0.5')
+        if (type(self.robot_max_quantity) is not int or
+                not 1 <= self.robot_max_quantity <= 99):
+            raise ValueError('Размер заявки робота должен быть от 1 до 99')
         if type(self.queue) is not bool or type(self.hints) is not bool:
             raise ValueError('Очередь и подсказки должны быть True или False')
         if any(goal.kind == 'position' and

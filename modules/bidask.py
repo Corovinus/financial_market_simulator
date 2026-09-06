@@ -50,9 +50,11 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     market = Market(scenario)
     market.start_period(0)
     robots = RobotController(market)
-    LOGGER.info('Robot controller started: robots=%s wolves=%s reaction=%s strategy=%s',
+    LOGGER.info('Robot controller started: robots=%s wolves=%s reaction=%s '
+                'strategy=%s style=%s spread=%s max_quantity=%s',
                 scenario.robots, scenario.wolves, scenario.reaction_ticks,
-                scenario.strategy)
+                scenario.strategy, scenario.robot_style,
+                scenario.robot_value_spread, scenario.robot_max_quantity)
     period = 0
     remaining = float(scenario.duration_ticks)
     selected_instrument = 0

@@ -57,7 +57,9 @@ class MultiplayerTests(unittest.TestCase):
 
     def test_teacher_settings_change_pacing_without_changing_payments(self):
         settings = {'scenario': 'B02', 'duration': 90, 'reaction': 4,
-                    'queue': False, 'hints': False}
+                    'queue': False, 'hints': False,
+                    'robot_style': 'cautious', 'robot_value_spread': 10,
+                    'robot_max_quantity': 15}
         scenario = teacher_scenario(settings)
         original = read_par(ROOT / 'data/original/B02.PAR')
         self.assertEqual((scenario.duration_ticks, scenario.reaction_ticks),
@@ -65,6 +67,9 @@ class MultiplayerTests(unittest.TestCase):
         self.assertEqual(scenario.payments, original.payments)
         self.assertFalse(scenario.queue)
         self.assertFalse(scenario.hints)
+        self.assertEqual((scenario.robot_style, scenario.robot_value_spread,
+                          scenario.robot_max_quantity),
+                         ('cautious', .1, 15))
 
     def test_open_room_is_discovered_on_local_network(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')

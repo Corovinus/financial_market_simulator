@@ -28,7 +28,10 @@ def teacher_scenario(settings):
     return replace(
         scenario, duration_ticks=settings['duration'] * 10,
         reaction_ticks=settings['reaction'] * 10,
-        queue=settings['queue'], hints=settings['hints'])
+        queue=settings['queue'], hints=settings['hints'],
+        robot_style=settings.get('robot_style', 'balanced'),
+        robot_value_spread=settings.get('robot_value_spread', 20) / 100,
+        robot_max_quantity=settings.get('robot_max_quantity', 99))
 
 
 def run_network_launcher(scale=1.0):
@@ -60,6 +63,8 @@ def run_network_launcher(scale=1.0):
     settings = {
         'name': 'Занятие FAST', 'scenario': 'B01', 'players': 8, 'bots': 2,
         'duration': 120, 'reaction': 6, 'queue': True, 'hints': True,
+        'robot_style': 'balanced', 'robot_value_spread': 20,
+        'robot_max_quantity': 99,
     }
     setting_index = 0
     editing_name = False
@@ -146,6 +151,9 @@ def run_network_launcher(scale=1.0):
         ('Название комнаты', 'name'), ('Сценарий', 'scenario'),
         ('Мест для игроков', 'players'), ('Постоянных роботов', 'bots'),
         ('Время периода, сек.', 'duration'), ('Реакция роботов, сек.', 'reaction'),
+        ('Стиль роботов', 'robot_style'),
+        ('Разброс оценки, %', 'robot_value_spread'),
+        ('Максимальный объём заявки', 'robot_max_quantity'),
         ('Очередь заявок', 'queue'), ('Подсказки F9', 'hints'),
     )
 
@@ -153,11 +161,16 @@ def run_network_launcher(scale=1.0):
         key = setting_rows[setting_index][1]
         if key == 'scenario':
             settings[key] = 'B02' if settings[key] == 'B01' else 'B01'
+        elif key == 'robot_style':
+            styles = ('cautious', 'balanced', 'aggressive')
+            settings[key] = styles[(styles.index(settings[key]) + delta) % 3]
         elif key in ('queue', 'hints'):
             settings[key] = not settings[key]
         else:
             limits = {'players': (1, 16, 1), 'bots': (0, 16, 1),
                       'duration': (30, 300, 30), 'reaction': (1, 15, 1)}
+            limits.update({'robot_value_spread': (0, 50, 5),
+                           'robot_max_quantity': (1, 99, 5)})
             if key in limits:
                 low, high, step = limits[key]
                 settings[key] = max(low, min(high,
@@ -209,7 +222,7 @@ def run_network_launcher(scale=1.0):
                         try_action(join)
                 elif position and mode == 'teacher':
                     for index in range(len(setting_rows)):
-                        if pg.Rect(82, 136 + index * 42, 796, 34).collidepoint(position):
+                        if pg.Rect(82, 132 + index * 32, 796, 28).collidepoint(position):
                             setting_index = index
                     if start_button.collidepoint(position):
                         try_action(lambda: play_local(False, settings))
@@ -364,18 +377,22 @@ def run_network_launcher(scale=1.0):
                  COLORS['panel'], COLORS['border'])
             write('Настройки преподавателя', 88, 105, COLORS['text'], body)
             for index, (caption, key) in enumerate(setting_rows):
-                rect = pg.Rect(82, 136 + index * 42, 796, 34)
+                rect = pg.Rect(82, 132 + index * 32, 796, 28)
                 active = index == setting_index
                 rounded(pg, screen, rect,
                         COLORS['accent'] if active else COLORS['background_alt'], 7)
                 value = settings[key]
                 shown = ('Да' if value is True else 'Нет' if value is False
                          else str(value))
+                if key == 'robot_style':
+                    shown = {'cautious': 'Осторожный',
+                             'balanced': 'Сбалансированный',
+                             'aggressive': 'Агрессивный'}[value]
                 if key == 'name' and editing_name:
                     shown += '_'
-                write(caption, 98, rect.y + 7,
+                write(caption, 98, rect.y + 5,
                       COLORS['white'] if active else COLORS['muted'], small)
-                write(shown, 570, rect.y + 7,
+                write(shown, 570, rect.y + 5,
                       COLORS['white'] if active else COLORS['accent_alt'], small)
             rounded(pg, screen, start_button, COLORS['accent'], 8)
             write('Создать игру', 724, 502, COLORS['white'], small)

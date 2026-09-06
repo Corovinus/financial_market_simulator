@@ -56,8 +56,10 @@ class RobotController:
             if robot < self.scenario.wolves:
                 self.values.append(tuple(fair))
             else:
+                spread = self.scenario.robot_value_spread
                 self.values.append(tuple(
-                    self.rng.interval(value * 0.8, value * 1.2)
+                    self.rng.interval(value * (1 - spread),
+                                      value * (1 + spread))
                     for value in fair))
 
     def step(self, elapsed_ticks: float) -> tuple[RobotEvent, ...]:
@@ -87,15 +89,20 @@ class RobotController:
         bid = self.market.book.best(instrument, 'bid')
         ask = self.market.book.best(instrument, 'ask')
 
-        can_buy = ask is not None and ask.owner != actor and ask.price <= value
-        can_sell = bid is not None and bid.owner != actor and bid.price >= value
+        tolerance = {'cautious': -0.02, 'balanced': 0.0,
+                     'aggressive': 0.03}[self.scenario.robot_style]
+        can_buy = (ask is not None and ask.owner != actor and
+                   ask.price <= value * (1 + tolerance))
+        can_sell = (bid is not None and bid.owner != actor and
+                    bid.price >= value * (1 - tolerance))
         if can_buy or can_sell:
             if can_buy and can_sell:
                 side = 'buy' if value - ask.price >= bid.price - value else 'sell'
             else:
                 side = 'buy' if can_buy else 'sell'
             quote = ask if side == 'buy' else bid
-            quantity = self.rng.interval_int(1, quote.quantity)
+            quantity = self.rng.interval_int(
+                1, min(quote.quantity, self.scenario.robot_max_quantity))
             try:
                 trade = self.market.take(actor, instrument, side, quantity)
             except OrderError:
@@ -108,7 +115,8 @@ class RobotController:
             if bounds is None:
                 continue
             price = self.rng.interval_int(*bounds)
-            quantity = self.rng.interval_int(1, 99)
+            quantity = self.rng.interval_int(
+                1, self.scenario.robot_max_quantity)
             try:
                 self.market.submit(actor, instrument, side, price, quantity)
             except OrderError:
@@ -116,12 +124,20 @@ class RobotController:
             return RobotEvent(actor, instrument, side, price, quantity)
         return None
 
-    @staticmethod
-    def _quote_bounds(side, value, bid, ask):
+    def _quote_bounds(self, side, value, bid, ask):
+        tolerance = {'cautious': -0.02, 'balanced': 0.0,
+                     'aggressive': 0.03}[self.scenario.robot_style]
+        bid_limit = value * (1 + tolerance)
+        ask_limit = value * (1 - tolerance)
+        spread = self.scenario.robot_value_spread
         if side == 'bid':
-            lower = bid.price + 1 if bid else max(1, math.floor(value * 0.8))
-            upper = min(998, math.floor(value), ask.price - 1 if ask else 998)
+            lower = (bid.price + 1 if bid else
+                     max(1, math.floor(value * (1 - spread) + 1e-9)))
+            upper = min(998, math.floor(bid_limit + 1e-9),
+                        ask.price - 1 if ask else 998)
         else:
-            lower = max(2, math.ceil(value), bid.price + 1 if bid else 2)
-            upper = ask.price - 1 if ask else min(999, math.ceil(value * 1.2))
+            lower = max(2, math.ceil(ask_limit - 1e-9),
+                        bid.price + 1 if bid else 2)
+            upper = (ask.price - 1 if ask else
+                     min(999, math.ceil(value * (1 + spread) - 1e-9)))
         return (lower, upper) if lower <= upper else None

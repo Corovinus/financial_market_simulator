@@ -30,6 +30,10 @@ def host_game(args, generated=False):
             scenario = replace(scenario, duration_ticks=round(args.duration * 10))
         if args.reaction is not None:
             scenario = replace(scenario, reaction_ticks=round(args.reaction * 10))
+    scenario = replace(
+        scenario, robot_style=args.robot_style,
+        robot_value_spread=args.robot_value_spread / 100,
+        robot_max_quantity=args.robot_max_quantity)
     server = LanServer(scenario, args.bind, args.port, args.players,
                        args.bots, seed, room_name=args.room_name).start()
     address = local_address()
@@ -91,6 +95,13 @@ def parser():
         command.add_argument('--bind', default='0.0.0.0')
         command.add_argument('--port', type=int, default=DEFAULT_PORT)
         command.add_argument('--scale', type=float, default=1.25)
+        command.add_argument('--robot-style',
+                             choices=('cautious', 'balanced', 'aggressive'),
+                             default='balanced')
+        command.add_argument('--robot-value-spread', type=float, default=20,
+                             help='Разброс оценки роботов, 0–50 процентов')
+        command.add_argument('--robot-max-quantity', type=int, default=99,
+                             help='Максимальный объём заявки робота, 1–99')
         if command is admin:
             command.add_argument('--seed', type=int)
     join.add_argument('--port', type=int, default=DEFAULT_PORT)

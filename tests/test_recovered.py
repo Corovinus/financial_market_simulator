@@ -33,6 +33,11 @@ class OriginalCases(unittest.TestCase):
         with self.assertRaises(ValueError):
             Scenario(**{**scenario.__dict__,
                         'score_parameters': (100, 0, 100, 6)})
+        for field, value in (('robot_style', 'unknown'),
+                             ('robot_value_spread', .6),
+                             ('robot_max_quantity', 100)):
+            with self.subTest(field=field), self.assertRaises(ValueError):
+                Scenario(**{**scenario.__dict__, field: value})
         with tempfile.TemporaryDirectory() as folder:
             path = Path(folder) / 'levels.json'
             payload = {'name': 'Внешний уровень',
@@ -280,6 +285,26 @@ class OriginalCases(unittest.TestCase):
         self.assertTrue(any(market.history_for(instrument, side)
                             for instrument in range(len(scenario.names))
                             for side in ('bid', 'ask')))
+
+    def test_configurable_robot_style_and_order_size(self):
+        base = Scenario(
+            periods=1, duration_ticks=100, rates=(10,), names=('Bond',),
+            payments=((110,),), cash=1000, positions=(10,),
+            score_parameters=(0, 0, 2000, 6), queue=True, robots=1,
+            wolves=1, reaction_ticks=10, strategy=1, hints=True,
+            robot_style='aggressive', robot_value_spread=.1,
+            robot_max_quantity=3)
+        market = Market(base)
+        market.start_period()
+        market.submit(0, 0, 'ask', 100, 10)
+        controller = RobotController(market, seed=0)
+        event = controller._act(1, (100.0,))
+        self.assertEqual(event.action, 'buy')
+        self.assertLessEqual(event.quantity, 3)
+        self.assertEqual(controller._quote_bounds('bid', 100, None, None),
+                         (90, 103))
+        self.assertEqual(controller._quote_bounds('ask', 100, None, None),
+                         (97, 110))
 
     def test_settlement_preserves_word_products_and_positions(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
