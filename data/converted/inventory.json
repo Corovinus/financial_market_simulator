@@ -1,0 +1,535 @@
+[
+  {
+    "name": "B01.PAR",
+    "size": 437,
+    "sha256": "69b50552bc9c7f83378040dcced61e230907d096bb907669acca8b5ef10e614c",
+    "purpose": "Параметры купонной и бескупонной облигации для BIDASK",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "B02.PAR",
+    "size": 497,
+    "sha256": "69900345883f08d9f113106159cd4011cdde2d44fcdb2c3441d2eb483463210a",
+    "purpose": "Параметры четырёх облигаций с переменными ставками для BIDASK",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "B03.EXE",
+    "size": 67872,
+    "sha256": "987f22f6e376687354df7aceed88686f5558788316203045b4c05bc9dab21402",
+    "purpose": "Облигации и фьючерсы",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 288,
+      "pages": 133,
+      "relocations": 1296,
+      "header_paragraphs": 326,
+      "min_alloc": 2179,
+      "max_alloc": 43139,
+      "ss": 4446,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 6690,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "B03.PAR",
+    "size": 1,
+    "sha256": "334359b90efed75da5f0ada1d5e6b256f4a6bd0aee7eb39c0f90182a021ffc8b",
+    "purpose": "Однобайтный параметр #; смысл пока UNKNOWN",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "B04.EXE",
+    "size": 52496,
+    "sha256": "df7ee71d7649c4de343eeea12c50e4e8d84d9cfaef25bedc55a947e2e3ec1ee7",
+    "purpose": "Неопределённая процентная ставка",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 272,
+      "pages": 103,
+      "relocations": 850,
+      "header_paragraphs": 215,
+      "min_alloc": 2065,
+      "max_alloc": 43025,
+      "ss": 3482,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 22025,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "BIDASK.EXE",
+    "size": 55200,
+    "sha256": "677f3b117c6e0d5fb9fb23145627f65c9a18a978cf6b04676d0f273e7529996d",
+    "purpose": "Общий двойной аукцион и роботы B01/B02",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 416,
+      "pages": 108,
+      "relocations": 961,
+      "header_paragraphs": 242,
+      "min_alloc": 2125,
+      "max_alloc": 43085,
+      "ss": 3684,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 20155,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "CA1.EXE",
+    "size": 59280,
+    "sha256": "cf06fa84e34a9e311e03af1f9541d3dd1ee7d432f2893debed32b9b69f161a94",
+    "purpose": "Рынок акций: избегание риска",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 400,
+      "pages": 116,
+      "relocations": 1148,
+      "header_paragraphs": 289,
+      "min_alloc": 2051,
+      "max_alloc": 43011,
+      "ss": 3818,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 8619,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "CA2.EXE",
+    "size": 54400,
+    "sha256": "6b0206dd0ac01b26aeb6aa2af8b5ebe258f19596857a35a128c647e9dfb37508",
+    "purpose": "Фиксированные цены акций",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 128,
+      "pages": 107,
+      "relocations": 883,
+      "header_paragraphs": 223,
+      "min_alloc": 1923,
+      "max_alloc": 42883,
+      "ss": 3451,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 22225,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "CA3.EXE",
+    "size": 56384,
+    "sha256": "2788a509c860839c7e9b9dce6f70a1c2a9e09996e68a55da91e0af24c1ddab75",
+    "purpose": "Рынок акций: склонность к риску",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 64,
+      "pages": 111,
+      "relocations": 966,
+      "header_paragraphs": 244,
+      "min_alloc": 1924,
+      "max_alloc": 42884,
+      "ss": 3555,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 24218,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "DEMO.EXE",
+    "size": 70778,
+    "sha256": "137d4ea7f53a22ee90e7c0abc298df1f23a2354cbea6d5fe1086d1f9fd5e0e6f",
+    "purpose": "Проигрыватель учебных слайдов",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 122,
+      "pages": 139,
+      "relocations": 886,
+      "header_paragraphs": 288,
+      "min_alloc": 816,
+      "max_alloc": 65535,
+      "ss": 4934,
+      "sp": 128,
+      "checksum": 0,
+      "ip": 0,
+      "cs": 0,
+      "relocation_offset": 62,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "egavga.BGi",
+    "size": 5554,
+    "sha256": "7ae39c91fc70ca387209ee3c7b407df4d0a8354ab3e6cbf2db1af0c7fc463c97",
+    "purpose": "Драйвер Borland EGA/VGA",
+    "type": "Borland graphics driver"
+  },
+  {
+    "name": "FAST.BAT",
+    "size": 1107,
+    "sha256": "ef75b8b49fd5cf3c7d8157019a961bef4d391344e420105e4c14c33f3465519a",
+    "purpose": "Русификатор, видеосовместимость, цикл меню и диспетчер запуска",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "FAST.DOC",
+    "size": 177646,
+    "sha256": "6d62da4379b3f31e178cb9a0e0494d08683e91d074baeb551c8cc75d2ab3063b",
+    "purpose": "Гипертекстовая документация CP866 с разделами @ и ссылками |...|",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "FTS_TUT.SLD",
+    "size": 81609,
+    "sha256": "4e02e76c180613e0ce2335ed201b4032764f19668e350db3402f21a6426cedb6",
+    "purpose": "Бинарные слайды знакомства с двойным аукционом",
+    "type": "binary tutorial slideshow"
+  },
+  {
+    "name": "HEAD.EXE",
+    "size": 8326,
+    "sha256": "2841ae22eed826127924b3f8945b516985a81d6ec2c86b5a29ed1d953ae3d741",
+    "purpose": "Диспетчер модулей и служебный компонент запуска",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 134,
+      "pages": 17,
+      "relocations": 1,
+      "header_paragraphs": 32,
+      "min_alloc": 14,
+      "max_alloc": 65535,
+      "ss": 494,
+      "sp": 128,
+      "checksum": 0,
+      "ip": 0,
+      "cs": 0,
+      "relocation_offset": 62,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "INSTALL.BAT",
+    "size": 2913,
+    "sha256": "f81f3248da62429ffb6d77d32c12dad3dd360642527b8b9908aee951b02affcb",
+    "purpose": "DOS-установка комплекта на другой диск",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "KEYRUS.COM",
+    "size": 22714,
+    "sha256": "fbb7003a1966d6c7992d17db4c34ba67ce1e16cd38757c1ef3a106046fe1f547",
+    "purpose": "Русификатор клавиатуры и экранных шрифтов",
+    "type": "DOS COM executable"
+  },
+  {
+    "name": "NOLFB.COM",
+    "size": 130,
+    "sha256": "ca003ebaa605fdece26e890d8e06ecb0bd3e1b18198665af8eb3f76349a5a802",
+    "purpose": "Предположительно отключение linear framebuffer; алгоритм не исследован",
+    "type": "DOS COM executable"
+  },
+  {
+    "name": "OP1.EXE",
+    "size": 53024,
+    "sha256": "a9103f6e14275f06338b2dcb0760d99898da1fe13daee9d72e4c795a2b0137cc",
+    "purpose": "Однопериодные опционы",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 288,
+      "pages": 104,
+      "relocations": 892,
+      "header_paragraphs": 225,
+      "min_alloc": 2063,
+      "max_alloc": 43023,
+      "ss": 3503,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 22150,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "OP1.PAR",
+    "size": 1,
+    "sha256": "334359b90efed75da5f0ada1d5e6b256f4a6bd0aee7eb39c0f90182a021ffc8b",
+    "purpose": "Однобайтный параметр #; смысл пока UNKNOWN",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "OP2.EXE",
+    "size": 55024,
+    "sha256": "94ef1d68ea3e4261c9b005d1d394323008b92bca3d0d443392ce9177976953f5",
+    "purpose": "Двухпериодные опционы",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 240,
+      "pages": 108,
+      "relocations": 967,
+      "header_paragraphs": 244,
+      "min_alloc": 2081,
+      "max_alloc": 43041,
+      "ss": 3627,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 23910,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "OP2.PAR",
+    "size": 1,
+    "sha256": "334359b90efed75da5f0ada1d5e6b256f4a6bd0aee7eb39c0f90182a021ffc8b",
+    "purpose": "Однобайтный параметр #; смысл пока UNKNOWN",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "OP3.EXE",
+    "size": 55056,
+    "sha256": "15e30dbfa002fd011760f8c37c59f0a3d2d328dca5b5f32b1e9cb62d9e496280",
+    "purpose": "Дельта-хеджирование",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 272,
+      "pages": 108,
+      "relocations": 973,
+      "header_paragraphs": 245,
+      "min_alloc": 2081,
+      "max_alloc": 43041,
+      "ss": 3628,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 23944,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "OP3.PAR",
+    "size": 1,
+    "sha256": "334359b90efed75da5f0ada1d5e6b256f4a6bd0aee7eb39c0f90182a021ffc8b",
+    "purpose": "Однобайтный параметр #; смысл пока UNKNOWN",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "PROBLEMS",
+    "size": 8010,
+    "sha256": "56cfb19e4bd17b5bc54ccd60737864d86b622cd358cf2d2ed561b0aa3f664552",
+    "purpose": "Текст учебных задач, не параметры торгов",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "RE1.EXE",
+    "size": 68656,
+    "sha256": "84036e949a4d10e7425b97a6b780b246dca5d3d03ad45eaa0b280b6bbf1bbd94",
+    "purpose": "Информационная эффективность",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 48,
+      "pages": 135,
+      "relocations": 628,
+      "header_paragraphs": 159,
+      "min_alloc": 4606,
+      "max_alloc": 45566,
+      "ss": 4643,
+      "sp": 65520,
+      "checksum": 0,
+      "ip": 6712,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "RE2.EXE",
+    "size": 70976,
+    "sha256": "57ef8f93b888368021ccdbfcff03a3b9780733e60d12bc28f4b5ecdb977f16d1",
+    "purpose": "Эффективность портфеля",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 320,
+      "pages": 139,
+      "relocations": 661,
+      "header_paragraphs": 167,
+      "min_alloc": 4609,
+      "max_alloc": 45569,
+      "ss": 4783,
+      "sp": 65520,
+      "checksum": 0,
+      "ip": 8597,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "RE3.EXE",
+    "size": 72512,
+    "sha256": "a1d21f05c1c2f614f0c4e326953601799e3068ab3843108375226cb45f1f758e",
+    "purpose": "Информация и опционы",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 320,
+      "pages": 142,
+      "relocations": 720,
+      "header_paragraphs": 182,
+      "min_alloc": 4613,
+      "max_alloc": 45573,
+      "ss": 4868,
+      "sp": 65520,
+      "checksum": 0,
+      "ip": 9602,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "RESULTS",
+    "size": 19568,
+    "sha256": "4a9f4a838839433e4f31aa16447fff4ecf3cc0aeb9eaa4068a612d8ef28d340b",
+    "purpose": "Историческая таблица результатов обучения (Минск, 1995)",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "SERIAL#.FTS",
+    "size": 5,
+    "sha256": "fd75c82e6be133bb87819ff77abfdca6f01c0480f36eaaf6b7e097a517273a59",
+    "purpose": "Серийные данные; точное использование пока не установлено",
+    "type": "CP866 text/data (classification requires inspection)"
+  },
+  {
+    "name": "STEND.EXE",
+    "size": 62256,
+    "sha256": "b8c8eea719d02d6c72033c743da81b1496ce53cdfa628c1dbe8c13cab8315d98",
+    "purpose": "Главное меню и просмотр гипертекста",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 304,
+      "pages": 122,
+      "relocations": 1082,
+      "header_paragraphs": 273,
+      "min_alloc": 1849,
+      "max_alloc": 42809,
+      "ss": 3818,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 5296,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "STEND.MNU",
+    "size": 3768,
+    "sha256": "c7b2d4f3ae197da7de8c2604c673d258156c344454b39c4cb461e6512bdca6f6",
+    "purpose": "Бинарный ресурс меню, не текстовый конфиг",
+    "type": "binary menu resource"
+  },
+  {
+    "name": "TUTBO.EXE",
+    "size": 72832,
+    "sha256": "88238a5ed3ceac6a0ca767f153df52fa9d173063d069194abe98aa6b3e60a0fa",
+    "purpose": "Учебный расчёт дюрации и иммунизации",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 128,
+      "pages": 143,
+      "relocations": 653,
+      "header_paragraphs": 165,
+      "min_alloc": 4192,
+      "max_alloc": 45152,
+      "ss": 4484,
+      "sp": 65520,
+      "checksum": 0,
+      "ip": 89,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "TUTCA.EXE",
+    "size": 88544,
+    "sha256": "00f7b829acd5d7877b07f742c09d42449f9ff58f685d01f64e431ac8f3efd18c",
+    "purpose": "Учебная модель CAPM и конкурентного равновесия",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 480,
+      "pages": 173,
+      "relocations": 1488,
+      "header_paragraphs": 374,
+      "min_alloc": 2390,
+      "max_alloc": 43350,
+      "ss": 5901,
+      "sp": 26380,
+      "checksum": 0,
+      "ip": 186,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  },
+  {
+    "name": "TUTOP.EXE",
+    "size": 80432,
+    "sha256": "0bfdc13cbf90160a48636830a2c90e504b7af6441ef7df682b0d035360e9450a",
+    "purpose": "Учебные опционные портфели и стратегии",
+    "type": "DOS MZ executable",
+    "mz": {
+      "signature": 23117,
+      "last_page_bytes": 48,
+      "pages": 158,
+      "relocations": 636,
+      "header_paragraphs": 161,
+      "min_alloc": 4364,
+      "max_alloc": 45324,
+      "ss": 5135,
+      "sp": 65520,
+      "checksum": 0,
+      "ip": 13724,
+      "cs": 0,
+      "relocation_offset": 28,
+      "overlay": 0
+    }
+  }
+]

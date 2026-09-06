@@ -1,0 +1,6 @@
+.venv/
+__pycache__/
+tools/vendor/
+data/reference_work/
+data/reference_other/
+*.pyc

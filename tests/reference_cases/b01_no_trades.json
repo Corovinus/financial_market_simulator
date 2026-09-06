@@ -1,0 +1,9 @@
+{
+  "scenario": "B01.PAR",
+  "origin": "DOSBox-X 2026.08.31, unmodified HEAD/BIDASK, only PAR duration changed to 30 deciseconds",
+  "observed": {"final_capital_display": "4597", "period_columns_display": ["4597", "4597", "4597"], "points_display": "2.76"},
+  "derived_from_manual": {"cash_after_period": [1550.0, 2237.5, 4596.875]},
+  "actions_bios_ticks": [[55, "SPACE"], [80, "SPACE"], [80, "SPACE"], [80, "SPACE"]],
+  "capture": "captures/b01_short_results.png",
+  "limits": "No trading actions. Display precision only; not an RNG/robot/score-boundary reference. Times are delays from the previous event."
+}
