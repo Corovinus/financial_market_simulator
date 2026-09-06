@@ -11,11 +11,11 @@ def draw_goals(pygame, screen, progress, player_name, selected, faces,
               color or COLORS['text'])
 
     screen.fill(COLORS['background'])
-    pygame.draw.circle(screen, (27, 64, 103), (900, 0), 260)
+    pygame.draw.circle(screen, COLORS['decor_top'], (900, 0), 260)
     rounded(pygame, screen, pygame.Rect(24, 18, 912, 58),
             COLORS['panel'], 15)
     write('Учебные цели', 48, 30, COLORS['accent'], title)
-    write(player_name[:28], 710, 38, COLORS['muted'], small)
+    write(player_name[:28], 620, 82, COLORS['muted'], small)
     finished = progress['finished']
     heading = ('Все цели выполнены' if progress['all_passed'] else
                'Есть невыполненные цели') if finished else 'Текущий прогресс'

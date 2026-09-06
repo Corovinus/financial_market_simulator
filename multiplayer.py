@@ -14,6 +14,7 @@ from market.network import (
     DEFAULT_PORT, LanClient, LanServer, local_address, parse_endpoint,
 )
 from modules.network_ui import run_network_client
+from modules.preferences import get_preferences, set_preferences
 
 
 ROOT = Path(__file__).resolve().parent
@@ -94,7 +95,7 @@ def parser():
     for command in (admin, host):
         command.add_argument('--bind', default='0.0.0.0')
         command.add_argument('--port', type=int, default=DEFAULT_PORT)
-        command.add_argument('--scale', type=float, default=1.25)
+        command.add_argument('--scale', type=float)
         command.add_argument('--robot-style',
                              choices=('cautious', 'balanced', 'aggressive'),
                              default='balanced')
@@ -105,13 +106,22 @@ def parser():
         if command is admin:
             command.add_argument('--seed', type=int)
     join.add_argument('--port', type=int, default=DEFAULT_PORT)
-    join.add_argument('--scale', type=float, default=1.25)
+    join.add_argument('--scale', type=float)
     return result
 
 
 def main():
     configure_logging()
     args = parser().parse_args()
+    if args.scale is None:
+        args.scale = get_preferences()['scale']
+    elif not 0.5 <= args.scale <= 5:
+        raise ValueError('Масштаб должен быть от 0.5 до 5')
+    else:
+        set_preferences(scale=args.scale,
+                        window_size=[round(960 * args.scale),
+                                     round(600 * args.scale)],
+                        fullscreen=False)
     if args.command == 'admin':
         host_game(args)
     elif args.command == 'host':

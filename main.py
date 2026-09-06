@@ -10,8 +10,12 @@ import sys
 from market.levels import CUSTOM_LEVELS, load_levels
 from modules.document import (document_lines, draw_document_line, load_sections,
                               page_scroll, table_of_contents)
-from modules.display import open_scaled_display, present_scaled
-from modules.theme import COLORS, card, font, label, mouse_position, rounded
+from modules.display import (handle_window_event, open_scaled_display,
+                             present_scaled, resize_window,
+                             toggle_fullscreen)
+from modules.preferences import get_preferences, set_preferences
+from modules.theme import (COLORS, apply_theme, card, draw_tooltip, font,
+                           label, mouse_position, rounded)
 
 ROOT = Path(__file__).resolve().parent
 APP_ROOT = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else ROOT
@@ -58,6 +62,7 @@ def build_groups(custom_levels=None):
         ('Эффективность', [(f'Case RE{i}', f'Описание RE{i}') for i in range(1, 4)]),
         ('Свои уровни', [(level.name, '') for level in custom_levels]),
         ('Сетевая игра', [('Локальная сеть', '')]),
+        ('Настройки', []),
         ('Конец', []),
     ]
 
@@ -78,9 +83,19 @@ def main():
     parser.add_argument('--screenshot', type=Path, help='Save the initial menu and exit (SDL dummy supported).')
     parser.add_argument('--speed', type=float, default=1.0,
                         help='Scale BIDASK decisecond time (1 is original pace).')
-    parser.add_argument('--scale', type=float, default=1.25,
+    parser.add_argument('--scale', type=float,
                         help='Initial window scale (0.5..5); the window can also be resized.')
     args = parser.parse_args()
+    preferences = get_preferences()
+    if args.scale is not None:
+        if not 0.5 <= args.scale <= 5:
+            parser.error('--scale должен быть от 0.5 до 5')
+        set_preferences(scale=args.scale,
+                        window_size=[round(960 * args.scale),
+                                     round(600 * args.scale)],
+                        fullscreen=False)
+    else:
+        args.scale = preferences['scale']
     import pygame as pg
     screen = None
     window = None
@@ -102,7 +117,8 @@ def main():
         heading = font(pg, 30, bold=True)
         formula = font(pg, 15)
         document_heading = font(pg, 22, bold=True)
-        table_font = pg.font.SysFont('consolas', 12)
+        table_font = pg.font.SysFont(
+            'consolas', round(12 * get_preferences()['font_scale']))
 
     reset_display()
     sections = load_sections(ROOT / 'data/converted/manual_sections.json')
@@ -114,16 +130,23 @@ def main():
     reader_back = 'items'
     running = True
     clock = pg.time.Clock()
-    sidebar_rects = [pg.Rect(36, 145 + index * 44, 208, 36)
+    sidebar_rects = [pg.Rect(36, 145 + index * 40, 208, 32)
                      for index in range(len(GROUPS))]
     open_button = pg.Rect(306, 474, 180, 42)
     back_button = pg.Rect(810, 31, 102, 34)
-    exit_yes_button = pg.Rect(308, 264, 260, 48)
-    exit_no_button = pg.Rect(588, 264, 260, 48)
     item_page_size = 6
+    settings_index = 0
+    hotkeys_back = 'settings'
+    mouse = None
+    setting_rows = (
+        ('Тема', 'theme'), ('Размер шрифта', 'font_scale'),
+        ('Звук', 'sound'), ('Масштаб окна', 'scale'),
+        ('Полноэкранный режим', 'fullscreen'),
+        ('Горячие клавиши', 'hotkeys'),
+    )
 
     LOGGER.info('Application started: scale=%s speed=%s groups=%s',
-                args.scale, args.speed, len(GROUPS))
+                get_preferences()['scale'], args.speed, len(GROUPS))
 
     def text(value, x, y, color=None, face=None):
         label(pg, screen, face or typeface, value, (x, y), color or COLORS['text'])
@@ -172,10 +195,12 @@ def main():
         return [label_value, '', 'Описание для этого раздела пока недоступно.']
 
     def enter_section():
-        nonlocal mode, row, choice, item_scroll
+        nonlocal mode, row, choice, item_scroll, running
         items = GROUPS[group][1]
-        if group == len(GROUPS) - 1:
-            mode = 'exit'
+        if GROUPS[group][0] == 'Конец':
+            running = False
+        elif GROUPS[group][0] == 'Настройки':
+            mode = 'settings'
         elif items:
             row, choice, item_scroll, mode = 0, 0, 0, 'items'
         else:
@@ -196,14 +221,39 @@ def main():
             mode = reader_back
         elif mode in ('action', 'toc'):
             mode = 'items'
-        elif mode in ('items', 'exit'):
+        elif mode in ('items', 'settings'):
             mode = 'main'
+        elif mode == 'hotkeys':
+            mode = hotkeys_back
+
+    def change_preference(delta=0):
+        nonlocal window, settings_index
+        key = setting_rows[settings_index][1]
+        values = get_preferences()
+        if key == 'theme':
+            theme = 'light' if values['theme'] == 'dark' else 'dark'
+            set_preferences(theme=theme)
+            apply_theme(theme)
+        elif key == 'font_scale':
+            value = max(0.8, min(1.2, round(values[key] + delta * .1, 1)))
+            set_preferences(font_scale=value)
+            reset_display()
+        elif key == 'sound':
+            set_preferences(sound=not values['sound'])
+        elif key == 'scale':
+            window = resize_window(pg, screen, values['scale'] + delta * .1)
+        elif key == 'fullscreen':
+            window = toggle_fullscreen(pg)
+        else:
+            mode_value = 'hotkeys'
+            return mode_value
+        return None
 
     def open_selected():
         """Activate the currently selected menu item."""
         nonlocal mode, choice, lines, scroll, reader_back
-        if group == len(GROUPS) - 1:
-            mode = 'exit'
+        if GROUPS[group][0] == 'Конец':
+            mode = 'main'
             return
         if not GROUPS[group][1]:
             mode = 'main'
@@ -214,8 +264,7 @@ def main():
         if group == 1 and row == 1:
             from modules.introduction import run_introduction
             LOGGER.info('Module started: introduction')
-            module_scale = min(value / base for value, base in zip(
-                pg.display.get_surface().get_size(), (960, 600)))
+            module_scale = get_preferences()['scale']
             try:
                 run_introduction(args.speed, module_scale, close_display=False)
             except Exception:
@@ -247,8 +296,7 @@ def main():
             LOGGER.info('Description opened: %s', label_value)
             return
         LOGGER.info('Module started: %s', label_value)
-        module_scale = min(value / base for value, base in zip(
-            pg.display.get_surface().get_size(), (960, 600)))
+        module_scale = get_preferences()['scale']
         try:
             if label_value == 'Локальная сеть':
                 from modules.network_launcher import run_network_launcher
@@ -280,19 +328,12 @@ def main():
     def click_action(position):
         """Make the menu usable with a mouse without changing keyboard flow."""
         nonlocal group, row, item_scroll, mode, choice, lines, scroll
-        nonlocal toc_index, toc_scroll, reader_back, running
+        nonlocal toc_index, toc_scroll, reader_back, running, settings_index
+        nonlocal hotkeys_back
         if position is None:
             return
         if mode != 'main' and back_button.collidepoint(position):
             go_back()
-            return
-        if mode == 'exit':
-            if exit_yes_button.collidepoint(position):
-                LOGGER.info('Exit confirmed via mouse')
-                running = False
-            elif exit_no_button.collidepoint(position):
-                LOGGER.info('Exit cancelled via mouse')
-                mode = 'main'
             return
         for index, rect in enumerate(sidebar_rects):
             if rect.collidepoint(position):
@@ -337,11 +378,25 @@ def main():
                     reader_back = 'toc'
                     mode, scroll = 'reader', 0
                     return
+        elif mode == 'settings':
+            for index, _setting in enumerate(setting_rows):
+                if pg.Rect(306, 196 + index * 46, 600, 40).collidepoint(position):
+                    settings_index = index
+                    target = change_preference(1)
+                    if target:
+                        hotkeys_back = 'settings'
+                        mode = target
+                    return
 
     while running:
         for event in pg.event.get():
+            window, handled = handle_window_event(pg, event, screen, window)
+            if handled:
+                continue
             if event.type == pg.QUIT:
                 running = False
+            elif event.type == pg.MOUSEMOTION:
+                mouse = mouse_position(pg, event, window, screen)
             elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 click_action(mouse_position(pg, event, window, screen))
                 continue
@@ -357,6 +412,12 @@ def main():
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if key == pg.K_F1:
+                if mode == 'hotkeys':
+                    mode = hotkeys_back
+                else:
+                    hotkeys_back, mode = mode, 'hotkeys'
+                continue
             if mode == 'reader':
                 if key in (pg.K_ESCAPE, pg.K_LEFT):
                     mode = reader_back
@@ -385,11 +446,22 @@ def main():
                     lines = [target, ''] + document_lines(sections[target])
                     reader_back = 'toc'
                     mode, scroll = 'reader', 0
-            elif mode == 'exit':
-                if key in (pg.K_RETURN, pg.K_y):
-                    running = False
-                elif key in (pg.K_ESCAPE, pg.K_n):
+            elif mode == 'hotkeys':
+                if key in (pg.K_ESCAPE, pg.K_LEFT):
+                    mode = hotkeys_back
+            elif mode == 'settings':
+                if key in (pg.K_ESCAPE, pg.K_LEFT):
                     mode = 'main'
+                elif key in (pg.K_UP, pg.K_DOWN):
+                    settings_index = wrapped_index(
+                        settings_index, 1 if key == pg.K_DOWN else -1,
+                        len(setting_rows))
+                elif key in (pg.K_LEFT, pg.K_RIGHT, pg.K_RETURN):
+                    delta = -1 if key == pg.K_LEFT else 1
+                    target = change_preference(delta)
+                    if target:
+                        hotkeys_back = 'settings'
+                        mode = target
             elif mode == 'main':
                 if key in (pg.K_UP, pg.K_DOWN):
                     set_group(wrapped_index(group, 1 if key == pg.K_DOWN else -1,
@@ -397,7 +469,7 @@ def main():
                 elif key in (pg.K_RETURN, pg.K_RIGHT):
                     enter_section()
                 elif key == pg.K_ESCAPE:
-                    mode = 'exit'
+                    running = False
             elif mode == 'items':
                 if key in (pg.K_ESCAPE, pg.K_LEFT):
                     mode = 'main'
@@ -422,8 +494,8 @@ def main():
         if not running:
             break
         screen.fill(COLORS['background'])
-        pg.draw.circle(screen, (27, 64, 103), (850, 0), 260)
-        pg.draw.circle(screen, (17, 85, 84), (720, 660), 220)
+        pg.draw.circle(screen, COLORS['decor_top'], (850, 0), 260)
+        pg.draw.circle(screen, COLORS['decor_bottom'], (720, 660), 220)
         rounded(pg, screen, pg.Rect(24, 20, 912, 58), COLORS['panel'], 16)
         text('FAST', 48, 30, COLORS['accent'], heading)
         text('Финансовая торговая система', 150, 38, COLORS['text'], typeface)
@@ -455,9 +527,14 @@ def main():
             text(stage, 790, 138, COLORS['accent_alt'], small)
             if mode == 'main':
                 item_count = len(GROUPS[group][1])
-                if group == len(GROUPS) - 1:
+                if GROUPS[group][0] == 'Конец':
                     text('Завершение работы с программой', 308, 214, COLORS['muted'], typeface)
-                    text('Enter или → — перейти к подтверждению', 308, 258, COLORS['danger'], typeface)
+                    text('Enter или → — закрыть программу', 308, 258, COLORS['danger'], typeface)
+                elif GROUPS[group][0] == 'Настройки':
+                    text('Оформление, окно, звук и управление', 308, 214,
+                         COLORS['muted'], typeface)
+                    text('Enter или → — открыть настройки', 308, 258,
+                         COLORS['accent_alt'], typeface)
                 elif item_count:
                     text('Материалы раздела', 308, 166, COLORS['muted'], small)
                     for value, rect in zip(
@@ -472,9 +549,9 @@ def main():
                 else:
                     text('В этом разделе пока нет уровней', 308, 214, COLORS['warning'], typeface)
                     text('Добавьте уровень в market/levels.py', 308, 258, COLORS['muted'], typeface)
-                if item_count or group == len(GROUPS) - 1:
+                if item_count or GROUPS[group][0] in ('Настройки', 'Конец'):
                     rounded(pg, screen, open_button, COLORS['accent'], 9)
-                    button_label = ('Подтвердить →' if group == len(GROUPS) - 1
+                    button_label = ('Завершить →' if GROUPS[group][0] == 'Конец'
                                     else 'Выбрать  →')
                     text(button_label, open_button.x + 22, open_button.y + 10,
                          COLORS['white'], typeface)
@@ -531,22 +608,64 @@ def main():
                         COLORS['accent'] if active else COLORS['background_alt'], 6)
                 text(f'{index + 1:>2}. {value}'[:72], rect.x + 10, rect.y + 5,
                      COLORS['white'] if active else COLORS['text'], small)
-        elif mode == 'exit':
-            text('Завершить работу?', 306, 140, COLORS['text'], heading)
-            text('Все открытые окна будут закрыты.', 308, 190, COLORS['muted'], typeface)
-            rounded(pg, screen, exit_yes_button, COLORS['danger'], 10)
-            text('Enter / Y — Да', exit_yes_button.x + 26,
-                 exit_yes_button.y + 13, COLORS['white'], typeface)
-            rounded(pg, screen, exit_no_button, COLORS['background_alt'], 10)
-            rounded(pg, screen, exit_no_button, COLORS['border'], 10, 1)
-            text('Esc / N — Нет', exit_no_button.x + 28,
-                 exit_no_button.y + 13, COLORS['text'], typeface)
+        elif mode == 'settings':
+            text('Настройки', 306, 126, COLORS['text'], heading)
+            text('Изменения сохраняются автоматически', 308, 170,
+                 COLORS['muted'], small)
+            values = get_preferences()
+            shown_values = {
+                'theme': 'Светлая' if values['theme'] == 'light' else 'Тёмная',
+                'font_scale': f'{values["font_scale"]:.0%}',
+                'sound': 'Включён' if values['sound'] else 'Выключен',
+                'scale': f'{values["scale"]:.0%}',
+                'fullscreen': 'Включён' if values['fullscreen'] else 'Выключен',
+                'hotkeys': 'Открыть →',
+            }
+            for index, (caption, key) in enumerate(setting_rows):
+                rect = pg.Rect(306, 196 + index * 46, 600, 40)
+                active = index == settings_index
+                rounded(pg, screen, rect,
+                        COLORS['accent'] if active else COLORS['background_alt'], 8)
+                text(caption, rect.x + 14, rect.y + 9,
+                     COLORS['white'] if active else COLORS['text'], typeface)
+                text(shown_values[key], rect.x + 390, rect.y + 10,
+                     COLORS['white'] if active else COLORS['accent_alt'], small)
+        elif mode == 'hotkeys':
+            text('Горячие клавиши', 306, 126, COLORS['text'], heading)
+            shortcuts = (
+                ('F1', 'этот экран'), ('F11', 'полноэкранный режим'),
+                ('Ctrl + / Ctrl −', 'масштаб окна'), ('↑ ↓ ← →', 'навигация'),
+                ('Enter', 'открыть или подтвердить'), ('Esc', 'назад / выход'),
+                ('B / S', 'купить / продать'), ('F9', 'оценка бумаги'),
+                ('F4', 'учебные цели'), ('R / F2', 'повтор / итоговый отчёт'),
+                ('+ / −', 'скорость локальной сессии'),
+            )
+            for index, (keys, action) in enumerate(shortcuts):
+                y = 176 + index * 34
+                text(keys, 316, y, COLORS['accent_alt'], small)
+                text(action, 510, y, COLORS['text'], small)
         rounded(pg, screen, pg.Rect(24, 562, 912, 24), COLORS['panel'], 8)
         footer = ('↑ ↓ разделы    Enter / → открыть    Esc выход' if mode == 'main' else
-                  '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action', 'toc') else
-                  'Enter / Y подтвердить    Esc / N отменить' if mode == 'exit' else
+                  '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action', 'toc', 'settings') else
+                  'Esc / ← — вернуться на предыдущий экран' if mode == 'hotkeys' else
                   '↑ ↓ прокрутка    PgUp/PgDn страница    Esc / ← назад')
         text(footer + '    мышь поддерживается', 38, 566, COLORS['muted'], small)
+        tooltip = None
+        if mouse and mode != 'main' and back_button.collidepoint(mouse):
+            tooltip = 'Вернуться на предыдущий экран'
+        elif mouse and mode in ('main', 'items') and open_button.collidepoint(mouse):
+            tooltip = 'Открыть выбранный пункт'
+        elif mouse and mode == 'settings':
+            hints = ('Переключить светлое и тёмное оформление',
+                     'Изменить размер текста во всех экранах',
+                     'Включить или отключить звуки событий',
+                     'Изменить размер окна', 'Переключить полноэкранный режим',
+                     'Показать все основные сочетания клавиш')
+            for index, hint in enumerate(hints):
+                if pg.Rect(306, 196 + index * 46, 600, 40).collidepoint(mouse):
+                    tooltip = hint
+                    break
+        draw_tooltip(pg, screen, small, tooltip, mouse)
         present_scaled(pg, screen, window)
         if args.screenshot:
             pg.image.save(window, args.screenshot)

@@ -4,8 +4,9 @@ from __future__ import annotations
 import time
 
 from market.orderbook import OrderBook, OrderError
-from .display import open_scaled_display, present_scaled
-from .theme import COLORS, card, font, label, mouse_position, rounded
+from .display import handle_window_event, open_scaled_display, present_scaled
+from .theme import (COLORS, back_button, card, draw_back_button, draw_tooltip,
+                    font, label, mouse_position, rounded)
 
 CPBND, ZCP = 0, 1
 
@@ -174,7 +175,7 @@ def _quantity(value):
 
 def run_introduction(speed: float = 1.0, scale: float = 1.0,
                      close_display: bool = True):
-    """Run the guided lesson; F10/Esc opens the DOS-style exit confirmation."""
+    """Run the guided lesson."""
     if not isinstance(speed, (int, float)) or speed <= 0:
         raise ValueError("Скорость должна быть положительной")
     import pygame as pg
@@ -188,10 +189,11 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
          "yellow": COLORS["warning"], "green": COLORS["buy"], "cyan": COLORS["accent"],
          "red": COLORS["danger"], "grey": COLORS["panel"], "brown": COLORS["panel_alt"]}
     page, text, mode, side_choice = 0, "", "", "bid"
-    moved, confirm, help_visible, running = False, False, False, True
+    moved, help_visible, running = False, False, True
     cash, holdings = 4238, [5, 12]
     book = _initial_book()
     status, status_until = "", 0.0
+    mouse = None
     clock = pg.time.Clock()
 
     def write(value, x, y, color="white", face=None):
@@ -271,10 +273,10 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
 
     def draw():
         screen.fill(C["blue"])
-        pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
+        pg.draw.circle(screen, COLORS['decor_top'], (920, 0), 250)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write("ФИНАНСОВАЯ ТОРГОВАЯ СИСТЕМА", 48, 30, "cyan", title_font)
-        write(f"Урок {page + 1} / {len(SCENES)}", 800, 36, "muted", small_font)
+        write(f"Урок {page + 1} / {len(SCENES)}", 650, 36, "muted", small_font)
         title, lines, kind = SCENES[page]
         market_kinds = ("market", "select", "quote", "invalid_quote", "buy8",
                         "buy42", "sell5", "sell90", "invalid_qty", "cancel")
@@ -315,27 +317,30 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
             for index, line in enumerate(("F1 - этот текст", "PgUp - следующий экран", "PgDn - предыдущий экран", "Home - первый экран", "F10, Esc - выход")):
                 write(line, 246, 230 + index * 32, "white")
             write("F1 - закрыть помощь", 246, 390, "yellow", small_font)
-        if confirm:
-            rounded(pg, screen, pg.Rect(160, 220, 640, 150), COLORS['background_alt'], 16)
-            rounded(pg, screen, pg.Rect(160, 220, 640, 150), COLORS['danger'], 2, 2)
-            write("Завершить урок?", 230, 255, "white", title_font)
-            write("Y / Enter — Да       N / Esc — Нет", 270, 315, "yellow")
+        draw_back_button(pg, screen, small_font)
+        tooltip = ('Вернуться в главное меню' if mouse and
+                   back_button(pg).collidepoint(mouse) else None)
+        draw_tooltip(pg, screen, small_font, tooltip, mouse)
 
     while running:
         for event in pg.event.get():
+            window, handled = handle_window_event(pg, event, screen, window)
+            if handled:
+                continue
             if event.type == pg.QUIT:
                 running = False; continue
+            if event.type == pg.MOUSEMOTION:
+                mouse = mouse_position(pg, event, window, screen)
+            if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                position = mouse_position(pg, event, window, screen)
+                if position and back_button(pg).collidepoint(position):
+                    running = False
+                continue
             if event.type != pg.KEYDOWN:
                 continue
             key, kind = event.key, SCENES[page][2]
-            if confirm:
-                if key in (pg.K_y, pg.K_RETURN):
-                    running = False
-                elif key in (pg.K_n, pg.K_ESCAPE):
-                    confirm = False
-                continue
             if key == pg.K_F10:
-                confirm = True
+                running = False
                 continue
             if key == pg.K_ESCAPE:
                 if kind == "cancel":
@@ -345,7 +350,7 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
                     text, mode = "", ""
                     set_status("Ввод отменен")
                 else:
-                    confirm = True
+                    running = False
                 continue
             if key == pg.K_q:
                 running = False; continue

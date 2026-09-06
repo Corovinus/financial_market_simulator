@@ -13,9 +13,10 @@ from market.network import (
     DEFAULT_PORT, LanClient, LanServer, discover_games, local_address,
     parse_endpoint,
 )
-from .display import open_scaled_display, present_scaled
+from .display import handle_window_event, open_scaled_display, present_scaled
 from .network_ui import run_network_client
-from .theme import COLORS, card, font, label, mouse_position, rounded
+from .theme import (COLORS, card, draw_tooltip, font, label, mouse_position,
+                    rounded)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -68,6 +69,7 @@ def run_network_launcher(scale=1.0):
     }
     setting_index = 0
     editing_name = False
+    mouse = None
     running = True
     clock = pg.time.Clock()
     connect_button = pg.Rect(712, 489, 164, 38)
@@ -193,14 +195,21 @@ def run_network_launcher(scale=1.0):
         if mode == 'connect' and time.monotonic() - last_search > 2:
             refresh_rooms()
         for event in pg.event.get():
+            window, handled = handle_window_event(pg, event, screen, window)
+            if handled:
+                continue
             if event.type == pg.QUIT:
                 running = False
                 continue
+            if event.type == pg.MOUSEMOTION:
+                mouse = mouse_position(pg, event, window, screen)
             if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 position = mouse_position(pg, event, window, screen)
-                if position and mode != 'menu' and back_button.collidepoint(position):
+                if position and back_button.collidepoint(position):
                     if editing_name:
                         editing_name = False
+                    elif mode == 'menu':
+                        running = False
                     else:
                         mode, status = 'menu', ''
                     continue
@@ -306,17 +315,17 @@ def run_network_launcher(scale=1.0):
                     try_action(lambda: play_local(False, settings))
 
         screen.fill(COLORS['background'])
-        pg.draw.circle(screen, (27, 64, 103), (900, 0), 260)
+        pg.draw.circle(screen, COLORS['decor_top'], (900, 0), 260)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write('Сетевая игра', 48, 30, COLORS['accent'], title)
         if mode == 'menu':
-            write(f'Ваш IP: {own_address}', 682, 39, COLORS['muted'], small)
+            write(f'Ваш IP: {own_address}', 590, 39, COLORS['muted'], small)
         else:
             write(f'Ваш IP: {own_address}', 590, 39, COLORS['muted'], small)
-            rounded(pg, screen, back_button, COLORS['background_alt'], 8)
-            rounded(pg, screen, back_button, COLORS['border'], 8, 1)
-            write('← Назад', back_button.x + 14, back_button.y + 8,
-                  COLORS['text'], small)
+        rounded(pg, screen, back_button, COLORS['background_alt'], 8)
+        rounded(pg, screen, back_button, COLORS['border'], 8, 1)
+        write('← Назад', back_button.x + 14, back_button.y + 8,
+              COLORS['text'], small)
 
         if mode == 'menu':
             for index, (caption, detail) in enumerate(choices):
@@ -403,5 +412,13 @@ def run_network_launcher(scale=1.0):
             status_color = (COLORS['muted'] if status == 'Открытые игры пока не найдены'
                             else COLORS['danger'])
             write(status[:100], 72, 558, status_color, small)
+        tooltip = None
+        if mouse and back_button.collidepoint(mouse):
+            tooltip = 'Вернуться в главное меню'
+        elif mouse and mode == 'connect' and connect_button.collidepoint(mouse):
+            tooltip = 'Подключиться по выбранному адресу'
+        elif mouse and mode == 'teacher' and start_button.collidepoint(mouse):
+            tooltip = 'Создать комнату с выбранными настройками'
+        draw_tooltip(pg, screen, small, tooltip, mouse)
         present_scaled(pg, screen, window)
         clock.tick(30)

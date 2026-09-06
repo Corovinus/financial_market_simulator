@@ -11,12 +11,12 @@ def draw_report(pygame, screen, report, instrument, faces, notice='',
               color or COLORS['text'])
 
     screen.fill(COLORS['background'])
-    pygame.draw.circle(screen, (27, 64, 103), (900, 0), 260)
+    pygame.draw.circle(screen, COLORS['decor_top'], (900, 0), 260)
     rounded(pygame, screen, pygame.Rect(24, 18, 912, 58),
             COLORS['panel'], 15)
     write('Итоговый отчёт', 48, 30, COLORS['accent'], title)
     write(f'{report["name"]} · место {report["rank"]}/{report["participants"]}',
-          590, 37, COLORS['warning'], small)
+          570, 80, COLORS['warning'], small)
 
     cards = (
         ('Начальный капитал', report['initial_capital'], COLORS['muted']),

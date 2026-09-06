@@ -15,9 +15,10 @@ from .educational import (
     option_payoff,
     risk_premium_bound,
 )
-from .display import open_scaled_display, present_scaled
+from .display import handle_window_event, open_scaled_display, present_scaled
 from .document import document_lines, draw_document_line, load_sections, page_scroll
-from .theme import COLORS, card, font, label as draw_label, mouse_position, rounded
+from .theme import (COLORS, back_button, card, draw_back_button, draw_tooltip,
+                    font, label as draw_label, mouse_position, rounded)
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -175,7 +176,9 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
     small_font = font(pg, 14)
     title_font = font(pg, 27, bold=True)
     formula_font = font(pg, 14)
-    table_font = pg.font.SysFont('consolas', 12)
+    from .preferences import get_preferences
+    table_font = pg.font.SysFont(
+        'consolas', round(12 * get_preferences()['font_scale']))
     manual = []
     manual_path = ROOT / "data/converted/manual_sections.json"
     if manual_path.exists():
@@ -203,6 +206,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
     selected, input_text, mode, scroll, frame = 0, "", "calc", 0, 1
     status, status_until = "", 0.0
     running, last = True, _calculate(label, fields)
+    mouse = None
     clock = pg.time.Clock()
 
     def write(value, x, y, color=None, face=None):
@@ -214,7 +218,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
 
     def draw():
         screen.fill(COLORS['background'])
-        pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
+        pg.draw.circle(screen, COLORS['decor_top'], (920, 0), 250)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         frame_text = ""
         if label == "Опционы":
@@ -288,6 +292,10 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
             rounded(pg, screen, pg.Rect(36, 492, 888, 42), COLORS['panel_alt'], 8)
             rounded(pg, screen, pg.Rect(36, 492, 888, 42), COLORS['warning'], 1, 2)
             write(status[:100], 52, 503, COLORS['warning'], small_font)
+        draw_back_button(pg, screen, small_font)
+        tooltip = ('Вернуться в главное меню' if mouse and
+                   back_button(pg).collidepoint(mouse) else None)
+        draw_tooltip(pg, screen, small_font, tooltip, mouse)
 
     def message(value, seconds=3.0):
         nonlocal status, status_until
@@ -295,10 +303,21 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
 
     while running:
         for event in pg.event.get():
+            window, handled = handle_window_event(pg, event, screen, window)
+            if handled:
+                continue
             if event.type == pg.QUIT:
                 running = False
+            elif event.type == pg.MOUSEMOTION:
+                mouse = mouse_position(pg, event, window, screen)
             elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 position = mouse_position(pg, event, window, screen)
+                if position and back_button(pg).collidepoint(position):
+                    if mode == 'manual':
+                        mode = 'calc'
+                    else:
+                        running = False
+                    continue
                 clicked = (next((index for index, rect in enumerate(field_rects())
                                  if rect.collidepoint(position)), None)
                            if position and mode != "manual" else None)

@@ -14,11 +14,14 @@ from market.goals import evaluate_goals
 from market.orderbook import OrderError
 from market.report import build_report, default_report_folder, export_report
 from market.robots import RobotController
-from .display import open_scaled_display, present_scaled
+from .display import handle_window_event, open_scaled_display, present_scaled
 from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
-from .theme import COLORS, card, font, label, mouse_position, rounded
+from .sound import play_sound
+from .theme import (COLORS, back_button, card, draw_back_button,
+                    draw_confirmation, draw_tooltip, font, label,
+                    mouse_position, rounded)
 
 
 LOGGER = logging.getLogger('fast.bidask')
@@ -77,6 +80,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     goals_actor = 0
     goals_selected = 0
     final_goals = None
+    confirm_exit = False
+    mouse = None
     running = True
     clock = pg.time.Clock()
 
@@ -110,10 +115,20 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                            f'Робот {goals_actor + 1}')
             draw_goals(pg, screen, goals_data, player_name, goals_selected,
                        (body_font, small_font, title_font))
+            draw_back_button(pg, screen, small_font)
+            if confirm_exit:
+                draw_confirmation(pg, screen, small_font, title_font,
+                                  'Выйти из активной игры?',
+                                  'Текущий период будет потерян.')
             return
         if report_data is not None:
             draw_report(pg, screen, report_data, report_instrument,
                         (body_font, small_font, title_font), report_notice)
+            draw_back_button(pg, screen, small_font)
+            if confirm_exit:
+                draw_confirmation(pg, screen, small_font, title_font,
+                                  'Выйти из активной игры?',
+                                  'Текущий период будет потерян.')
             return
         if replay_index is not None:
             players = {str(actor): ('Игрок' if actor == 0 else
@@ -123,17 +138,23 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 pg, screen, market.replay_frames[replay_index], replay_index,
                 len(market.replay_frames), scenario.names, players,
                 replay_observed, (body_font, small_font, title_font))
+            draw_back_button(pg, screen, small_font)
+            if confirm_exit:
+                draw_confirmation(pg, screen, small_font, title_font,
+                                  'Выйти из активной игры?',
+                                  'Текущий период будет потерян.')
             return
         screen.fill(COLORS['background'])
-        pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
+        pg.draw.circle(screen, COLORS['decor_top'], (920, 0), 250)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write('Торговая сессия', 48, 30, COLORS['accent'], title_font)
-        write('BID / ASK', 288, 38, COLORS['muted'], small_font)
         if scenario.goals:
-            write(f'F4 · цели ({len(scenario.goals)})', 390, 38,
+            write(f'F4 · цели ({len(scenario.goals)})', 350, 38,
                   COLORS['accent_alt'], small_font)
-        write(f'Период {period + 1} / {scenario.periods}', 660, 34, COLORS['text'], body_font)
-        write(f'{max(0, int(remaining / 10))} сек.', 820, 34, COLORS['warning'], body_font)
+        write(f'Период {period + 1} / {scenario.periods}', 570, 34,
+              COLORS['text'], body_font)
+        write(f'{max(0, int(remaining / 10))} сек.', 720, 34,
+              COLORS['warning'], body_font)
         pg.draw.rect(screen, COLORS['background_alt'], (48, 84, 580, 8), border_radius=4)
         progress = max(0, min(1, remaining / max(1, scenario.duration_ticks)))
         pg.draw.rect(screen, COLORS['accent'], (48, 84, int(580 * progress), 8), border_radius=4)
@@ -189,8 +210,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                     write(goal_text, 210, 374,
                           COLORS['buy'] if final_goals['all_passed'] else
                           COLORS['sell'], small_font)
-        action_text = ('Enter — следующий период   Esc — выход' if period + 1 < scenario.periods
-                       else 'Enter — завершить попытку   Esc — выход')
+        if result_screen:
+            action_text = ('Enter — следующий период   Esc — выход'
+                           if period + 1 < scenario.periods else
+                           'Enter — завершить попытку   Esc — выход')
+        else:
+            action_text = '↑↓ бумага   ←→ Bid/Ask   цифры — заявка   Esc — выход'
         write(action_text, 54, 494, COLORS['muted'], small_font)
         if result_screen:
             write('R — посмотреть повтор', 682, 472,
@@ -214,10 +239,25 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             write(status[:86], 54, 538, COLORS['warning'], body_font)
         elif last_robot_event:
             write(last_robot_event[:86], 54, 538, COLORS['muted'], small_font)
+        draw_back_button(pg, screen, small_font)
+        tooltip = None
+        if mouse and back_button(pg).collidepoint(mouse):
+            tooltip = ('Вернуться в меню' if result_screen else
+                       'Выйти из активной игры')
+        elif mouse and not result_screen and buy_button.collidepoint(mouse):
+            tooltip = 'Принять лучшую заявку Ask'
+        elif mouse and not result_screen and sell_button.collidepoint(mouse):
+            tooltip = 'Принять лучшую заявку Bid'
+        draw_tooltip(pg, screen, small_font, tooltip, mouse)
+        if confirm_exit:
+            draw_confirmation(pg, screen, small_font, title_font,
+                              'Выйти из активной игры?',
+                              'Текущий период будет потерян.')
 
     while running:
         elapsed = clock.tick(60) / 1000.0
-        if not result_screen and input_mode is None and goals_data is None:
+        if (not result_screen and input_mode is None and goals_data is None and
+                not confirm_exit):
             elapsed_ticks = min(remaining, elapsed * 10.0 * float(speed))
             remaining -= elapsed_ticks
             for robot_event in robots.step(elapsed_ticks):
@@ -230,20 +270,50 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                             robot_event.actor, robot_event.instrument,
                             robot_event.action, robot_event.price,
                             robot_event.quantity)
+                if robot_event.action in ('buy', 'sell'):
+                    play_sound(pg, 'trade')
             if remaining <= 0:
                 projected = market.finish_period()
                 result_screen = True
+                play_sound(pg, 'period')
                 if period + 1 == scenario.periods and scenario.goals:
                     final_goals = evaluate_goals(
                         scenario, market.replay_frames, 0)
                 message(f'Период завершён. Будущий капитал: {projected:.2f}', 30)
         for event in pg.event.get():
-            if event.type == pg.QUIT:
-                running = False
+            window, handled = handle_window_event(pg, event, screen, window)
+            if handled:
                 continue
+            if event.type == pg.QUIT:
+                if result_screen:
+                    running = False
+                else:
+                    confirm_exit = True
+                continue
+            if event.type == pg.MOUSEMOTION:
+                mouse = mouse_position(pg, event, window, screen)
             if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 position = mouse_position(pg, event, window, screen)
-                if position and not result_screen:
+                if confirm_exit and position:
+                    yes, no = draw_confirmation(
+                        pg, screen, small_font, title_font,
+                        'Выйти из активной игры?', 'Текущий период будет потерян.')
+                    if yes.collidepoint(position):
+                        running = False
+                    elif no.collidepoint(position):
+                        confirm_exit = False
+                elif position and back_button(pg).collidepoint(position):
+                    if goals_data is not None:
+                        goals_data = None
+                    elif report_data is not None:
+                        report_data = None
+                    elif replay_index is not None:
+                        replay_index = None
+                    elif result_screen:
+                        running = False
+                    else:
+                        confirm_exit = True
+                elif position and not result_screen:
                     selected_quote = next(((index, side) for index, side, rect in quote_rects()
                                            if rect.collidepoint(position)), None)
                     if selected_quote:
@@ -258,6 +328,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if confirm_exit:
+                if key in (pg.K_RETURN, pg.K_y):
+                    running = False
+                elif key in (pg.K_ESCAPE, pg.K_n):
+                    confirm_exit = False
+                continue
             if goals_data is not None:
                 if key in (pg.K_ESCAPE, pg.K_F4):
                     goals_data = None
@@ -352,6 +428,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                         else:
                             quantity = int(input_text)
                             market.take(0, selected_instrument, input_mode, quantity)
+                            play_sound(pg, 'trade')
                             message('Сделка совершена')
                         input_mode, input_text = None, ''
                     except (ValueError, OrderError) as error:
@@ -361,7 +438,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                     input_text += event.unicode
                 continue
             if key == pg.K_ESCAPE or key == pg.K_e:
-                running = False
+                confirm_exit = True
             elif key == pg.K_UP:
                 selected_instrument = (selected_instrument - 1) % len(scenario.names)
             elif key == pg.K_DOWN:

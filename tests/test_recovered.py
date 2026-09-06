@@ -20,12 +20,33 @@ from modules.document import (
     page_scroll, pretty_formula, table_of_contents,
 )
 from market.levels import CUSTOM_LEVELS, CustomLevel, add_level, load_levels
+from modules.preferences import DEFAULTS, normalize_preferences
+from modules.theme import COLORS, apply_theme
 from main import build_groups, wrapped_index
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class OriginalCases(unittest.TestCase):
+    def test_interface_preferences_are_validated_and_themes_apply(self):
+        values = normalize_preferences({
+            'scale': 2, 'font_scale': 1.2, 'theme': 'light',
+            'sound': False, 'fullscreen': True, 'window_size': [1440, 900],
+        })
+        self.assertEqual(values['window_size'], [1440, 900])
+        self.assertEqual((values['scale'], values['font_scale']), (2.0, 1.2))
+        invalid = normalize_preferences({
+            'scale': True, 'font_scale': 5, 'theme': 'neon',
+            'sound': 'yes', 'window_size': [10, 10],
+        })
+        self.assertEqual(invalid, DEFAULTS)
+        apply_theme('light')
+        self.assertGreater(COLORS['background'][0], 200)
+        apply_theme('dark')
+        self.assertLess(COLORS['background'][0], 30)
+        self.assertEqual([name for name, _items in build_groups()][-2:],
+                         ['Настройки', 'Конец'])
+
     def test_scenario_and_external_level_validation(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
         with self.assertRaises(ValueError):

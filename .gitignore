@@ -5,6 +5,7 @@ data/reference_work/
 data/reference_other/
 *.pyc
 fast.log*
+settings.json
 build/
 dist/
 *.spec

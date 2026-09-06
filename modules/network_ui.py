@@ -5,11 +5,14 @@ import time
 
 from market.config import parse_offer
 from market.report import default_report_folder, export_report
-from .display import open_scaled_display, present_scaled
+from .display import handle_window_event, open_scaled_display, present_scaled
 from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
-from .theme import COLORS, card, font, label, rounded
+from .sound import play_sound
+from .theme import (COLORS, back_button, card, draw_back_button,
+                    draw_confirmation, draw_tooltip, font, label,
+                    mouse_position, rounded)
 
 
 def run_network_client(client, role='player', scale=1.0,
@@ -48,6 +51,10 @@ def run_network_client(client, role='player', scale=1.0,
     goals_selected = 0
     goals_actor = client.actor or 0
     last_goal_refresh = 0.0
+    confirm_exit = False
+    mouse = None
+    last_action = (tuple(sorted(state['actions'][-1].items()))
+                   if state.get('actions') else None)
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -107,11 +114,21 @@ def run_network_client(client, role='player', scale=1.0,
             draw_goals(
                 pg, screen, goals_data, owner_name(state, goal_actor),
                 goals_selected, (body, small, title), can_switch=is_admin)
+            draw_back_button(pg, screen, small)
+            if confirm_exit:
+                draw_confirmation(pg, screen, small, title,
+                                  'Выйти из активной игры?',
+                                  'Подключение к комнате будет закрыто.')
             return
         if report_data is not None:
             draw_report(pg, screen, report_data, report_instrument,
                         (body, small, title), report_notice,
                         can_switch=is_admin)
+            draw_back_button(pg, screen, small)
+            if confirm_exit:
+                draw_confirmation(pg, screen, small, title,
+                                  'Выйти из активной игры?',
+                                  'Подключение к комнате будет закрыто.')
             return
         if replay_data is not None:
             names = tuple(row['name'] for row in state['book'])
@@ -119,9 +136,14 @@ def run_network_client(client, role='player', scale=1.0,
                 pg, screen, replay_data['frame'], replay_data['index'],
                 replay_data['total'], names, state['players'],
                 replay_observed, (body, small, title))
+            draw_back_button(pg, screen, small)
+            if confirm_exit:
+                draw_confirmation(pg, screen, small, title,
+                                  'Выйти из активной игры?',
+                                  'Подключение к комнате будет закрыто.')
             return
         screen.fill(COLORS['background'])
-        pg.draw.circle(screen, (27, 64, 103), (900, 0), 260)
+        pg.draw.circle(screen, COLORS['decor_top'], (900, 0), 260)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write('FAST LAN', 48, 30, COLORS['accent'], title)
         phase_names = {'lobby': 'Ожидание', 'running': 'Торги',
@@ -129,7 +151,7 @@ def run_network_client(client, role='player', scale=1.0,
                        'finished': 'Завершено'}
         write(phase_names.get(state['phase'], state['phase']), 700, 34,
               COLORS['warning'], body)
-        write(room_label, 760, 58, COLORS['muted'], small)
+        write(room_label[:52], 48, 78, COLORS['muted'], small)
         write(f'Seed {state["seed"]}', 570, 42, COLORS['muted'], small)
         if state.get('goal_count'):
             write(f'F4 · цели ({state["goal_count"]})', 390, 42,
@@ -270,6 +292,14 @@ def run_network_client(client, role='player', scale=1.0,
                   42, 548, COLORS['warning'], small)
         else:
             write('Esc — выход', 42, 548, COLORS['muted'], small)
+        draw_back_button(pg, screen, small)
+        tooltip = ('Вернуться в меню' if mouse and
+                   back_button(pg).collidepoint(mouse) else None)
+        draw_tooltip(pg, screen, small, tooltip, mouse)
+        if confirm_exit:
+            draw_confirmation(pg, screen, small, title,
+                              'Выйти из активной игры?',
+                              'Подключение к комнате будет закрыто.')
 
     while running:
         while True:
@@ -278,7 +308,18 @@ def run_network_client(client, role='player', scale=1.0,
             except queue.Empty:
                 break
             if update == 'state':
+                previous_phase = state.get('phase')
                 state = value
+                actions = state.get('actions', ())
+                current_action = (tuple(sorted(actions[-1].items()))
+                                  if actions else None)
+                if (current_action != last_action and actions and
+                        actions[-1].get('kind') in ('buy', 'sell')):
+                    play_sound(pg, 'trade')
+                last_action = current_action
+                if (previous_phase in ('running', 'paused') and
+                        state.get('phase') in ('result', 'finished')):
+                    play_sound(pg, 'period')
             elif update == 'replay':
                 replay_data = value
             elif update == 'report':
@@ -293,12 +334,48 @@ def run_network_client(client, role='player', scale=1.0,
                 network_failed = True
                 message('Связь с сервером потеряна: ' + value, 30)
         for event in pg.event.get():
+            window, handled = handle_window_event(pg, event, screen, window)
+            if handled:
+                continue
             if event.type == pg.QUIT:
-                running = False
+                if state.get('phase') in ('running', 'paused'):
+                    confirm_exit = True
+                else:
+                    running = False
+                continue
+            if event.type == pg.MOUSEMOTION:
+                mouse = mouse_position(pg, event, window, screen)
+            if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                position = mouse_position(pg, event, window, screen)
+                if confirm_exit and position:
+                    yes, no = draw_confirmation(
+                        pg, screen, small, title, 'Выйти из активной игры?',
+                        'Подключение к комнате будет закрыто.')
+                    if yes.collidepoint(position):
+                        running = False
+                    elif no.collidepoint(position):
+                        confirm_exit = False
+                elif position and back_button(pg).collidepoint(position):
+                    if goals_open:
+                        goals_open, goals_data = False, None
+                    elif report_data is not None:
+                        report_data = None
+                    elif replay_data is not None:
+                        replay_data = None
+                    elif state.get('phase') in ('running', 'paused'):
+                        confirm_exit = True
+                    else:
+                        running = False
                 continue
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if confirm_exit:
+                if key in (pg.K_RETURN, pg.K_y):
+                    running = False
+                elif key in (pg.K_ESCAPE, pg.K_n):
+                    confirm_exit = False
+                continue
             if goals_open and goals_data is None:
                 if key in (pg.K_ESCAPE, pg.K_F4):
                     goals_open = False
@@ -382,7 +459,10 @@ def run_network_client(client, role='player', scale=1.0,
                     input_text += event.unicode
                 continue
             if key == pg.K_ESCAPE:
-                running = False
+                if state.get('phase') in ('running', 'paused'):
+                    confirm_exit = True
+                else:
+                    running = False
             elif key == pg.K_F4 and state.get('goal_count'):
                 goals_actor = observed if is_admin else client.actor
                 goals_open = True

@@ -19,11 +19,11 @@ def draw_replay_frame(pygame, screen, frame, index, total, names,
         return players.get(str(actor), players.get(actor, f'ID {actor + 1}'))
 
     screen.fill(COLORS['background'])
-    pygame.draw.circle(screen, (27, 64, 103), (900, 0), 260)
+    pygame.draw.circle(screen, COLORS['decor_top'], (900, 0), 260)
     rounded(pygame, screen, pygame.Rect(24, 18, 912, 58),
             COLORS['panel'], 15)
     write('Повтор сессии', 48, 30, COLORS['accent'], title)
-    write(f'Событие {index + 1} / {total}', 730, 35,
+    write(f'Событие {index + 1} / {total}', 620, 35,
           COLORS['warning'], body)
     progress = (index + 1) / max(1, total)
     pygame.draw.rect(screen, COLORS['background_alt'], (48, 86, 864, 7),
