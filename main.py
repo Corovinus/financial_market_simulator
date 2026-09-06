@@ -257,9 +257,15 @@ def main():
         for index, rect in enumerate(sidebar_rects):
             if rect.collidepoint(position):
                 set_group(index, 'mouse')
+                enter_section()
                 return
-        if mode == 'main' and open_button.collidepoint(position):
-            enter_section()
+        if mode == 'main':
+            for index, rect in enumerate(item_rects()[:6]):
+                if rect.collidepoint(position):
+                    row, mode = index, 'items'
+                    return
+            if open_button.collidepoint(position):
+                enter_section()
         elif mode == 'items':
             for index, rect in enumerate(item_rects()):
                 if rect.collidepoint(position):
@@ -403,18 +409,22 @@ def main():
                     text('Завершение работы с программой', 308, 214, COLORS['muted'], typeface)
                     text('Enter или → — перейти к подтверждению', 308, 258, COLORS['danger'], typeface)
                 elif item_count:
-                    text(f'{item_count} доступных материалов', 308, 214, COLORS['accent_alt'], typeface)
-                    text('↑ ↓ — выбрать раздел', 308, 258, COLORS['muted'], typeface)
-                    text('Enter или → — открыть раздел', 308, 292, COLORS['muted'], typeface)
+                    text('Материалы раздела', 308, 166, COLORS['muted'], small)
+                    for value, rect in zip(
+                            (item[0] for item in GROUPS[group][1][:6]),
+                            item_rects()[:6]):
+                        rounded(pg, screen, rect, COLORS['background_alt'], 8)
+                        text(value, rect.x + 16, rect.y + 7,
+                             COLORS['text'], typeface)
+                    if item_count > 6:
+                        text(f'и ещё {item_count - 6}…', 760, 452,
+                             COLORS['muted'], small)
                 else:
                     text('В этом разделе пока нет уровней', 308, 214, COLORS['warning'], typeface)
                     text('Добавьте уровень в market/levels.py', 308, 258, COLORS['muted'], typeface)
-                rounded(pg, screen, pg.Rect(308, 360, 580, 86), COLORS['background_alt'], 12)
-                text('Навигация соответствует расположению', 330, 382, COLORS['warning'], typeface)
-                text('Вертикальное меню управляется стрелками ↑ и ↓.', 330, 414, COLORS['text'], small)
                 if item_count or group == len(GROUPS) - 1:
                     rounded(pg, screen, open_button, COLORS['accent'], 9)
-                    text('Открыть  →', open_button.x + 22, open_button.y + 10,
+                    text('Выбрать  →', open_button.x + 22, open_button.y + 10,
                          COLORS['white'], typeface)
             elif mode == 'items':
                 options = [item[0] for item in GROUPS[group][1]]
