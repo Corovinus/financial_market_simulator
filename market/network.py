@@ -1,0 +1,412 @@
+"""Authoritative local-network session and a small JSON-over-TCP protocol."""
+from dataclasses import replace
+import json
+import logging
+import math
+import secrets
+import socket
+import socketserver
+import threading
+import time
+
+from .config import Scenario
+from .calculations import bond_value, future_capital
+from .engine import Market
+from .orderbook import OrderError
+from .robots import RobotController
+
+
+LOGGER = logging.getLogger('fast.network')
+DEFAULT_PORT = 8765
+MAX_MESSAGE = 65_536
+
+
+class GameSession:
+    """One synchronized market shared by player and administrator clients."""
+
+    def __init__(self, scenario: Scenario, human_slots=4, bots=4, seed=0):
+        if not isinstance(scenario, Scenario):
+            raise TypeError('Ожидался Scenario')
+        if type(human_slots) is not int or not 1 <= human_slots <= 16:
+            raise ValueError('Число мест игроков должно быть от 1 до 16')
+        if type(bots) is not int or not 0 <= bots <= 32:
+            raise ValueError('Число роботов должно быть от 0 до 32')
+        total = human_slots + bots
+        self.scenario = replace(scenario, robots=total - 1,
+                                wolves=min(scenario.wolves, bots))
+        self.human_slots = human_slots
+        self.bot_count = bots
+        self.seed = seed
+        self.market = Market(self.scenario)
+        self.market.start_period(0)
+        self.period = 0
+        self.remaining = float(self.scenario.duration_ticks)
+        self.phase = 'lobby'
+        self.players = {}
+        self.connected = set()
+        self.actions = []
+        self.result = None
+        self.scores = None
+        self._robots = None
+        self._sequence = 0
+        self._lock = threading.RLock()
+
+    def join(self, name):
+        clean = str(name).strip()[:24]
+        if not clean:
+            raise ValueError('Введите имя игрока')
+        with self._lock:
+            if self.phase != 'lobby':
+                actor = next((number for number, saved in self.players.items()
+                              if saved == clean and number not in self.connected),
+                             None)
+                if actor is None:
+                    raise ValueError('Игра уже началась')
+                self.connected.add(actor)
+                self._record(actor, 'reconnect')
+                return actor
+            if clean in self.players.values():
+                raise ValueError('Это имя уже занято')
+            actor = next((index for index in range(self.human_slots)
+                          if index not in self.players), None)
+            if actor is None:
+                raise ValueError('Свободных мест нет')
+            self.players[actor] = clean
+            self.connected.add(actor)
+            self._record(actor, 'join')
+            return actor
+
+    def disconnect(self, actor):
+        with self._lock:
+            self.connected.discard(actor)
+            if self.phase == 'lobby':
+                self.players.pop(actor, None)
+            self._record(actor, 'disconnect')
+
+    def start_or_continue(self):
+        with self._lock:
+            if self.phase == 'lobby':
+                if not self.players:
+                    raise ValueError('Нужен хотя бы один игрок')
+                robot_actors = tuple(actor for actor in range(len(self.market.portfolios))
+                                     if actor not in self.players)
+                self._robots = RobotController(self.market, self.seed,
+                                               robot_actors)
+                self.phase = 'running'
+                self._record(None, 'start')
+            elif self.phase == 'paused':
+                self.phase = 'running'
+                self._record(None, 'resume')
+            elif self.phase == 'result':
+                if self.period + 1 >= self.scenario.periods:
+                    self.phase = 'finished'
+                else:
+                    self.period += 1
+                    self.market.start_period(self.period)
+                    self._robots.start_period(self.period)
+                    self.remaining = float(self.scenario.duration_ticks)
+                    self.result = None
+                    self.scores = None
+                    self.phase = 'running'
+                    self._record(None, 'next_period')
+            return self.phase
+
+    def toggle_pause(self):
+        with self._lock:
+            if self.phase == 'running':
+                self.phase = 'paused'
+                self._record(None, 'pause')
+            elif self.phase == 'paused':
+                self.phase = 'running'
+                self._record(None, 'resume')
+            else:
+                raise ValueError('Пауза доступна только во время торгов')
+            return self.phase
+
+    def tick(self, seconds):
+        if not isinstance(seconds, (int, float)) or not math.isfinite(seconds) or seconds < 0:
+            raise ValueError('Неверный интервал времени')
+        with self._lock:
+            if self.phase != 'running':
+                return
+            elapsed = min(self.remaining, seconds * 10)
+            self.remaining -= elapsed
+            if self._robots:
+                for event in self._robots.step(elapsed):
+                    self._record(event.actor, event.action, event.instrument,
+                                 event.price, event.quantity)
+            if self.remaining <= 0:
+                self._finish_period()
+
+    def end_period(self):
+        with self._lock:
+            if self.phase not in ('running', 'paused'):
+                raise ValueError('Период сейчас не идёт')
+            self.remaining = 0
+            self._finish_period()
+
+    def _finish_period(self):
+        self.result = {
+            str(actor): future_capital(
+                self.scenario, portfolio.cash,
+                tuple(portfolio.positions), self.period)
+            for actor, portfolio in enumerate(self.market.portfolios)
+        }
+        self.market.finish_period()
+        self.scores = {actor: self.market.score(value)
+                       for actor, value in self.result.items()}
+        self.phase = 'result'
+        self._record(None, 'period_result')
+
+    def trade(self, actor, command):
+        with self._lock:
+            if self.phase != 'running':
+                raise ValueError('Торги сейчас не идут')
+            if actor not in self.players or actor not in self.connected:
+                raise ValueError('Игрок не подключён')
+            kind = command.get('kind')
+            instrument = command.get('instrument')
+            quantity = command.get('quantity')
+            if kind in ('bid', 'ask'):
+                price = command.get('price')
+                quote = self.market.submit(actor, instrument, kind, price,
+                                           quantity)
+                self._record(actor, kind, instrument, quote.price,
+                             quote.quantity)
+            elif kind in ('buy', 'sell'):
+                trade = self.market.take(actor, instrument, kind, quantity)
+                self._record(actor, kind, instrument, trade.price,
+                             trade.quantity)
+            else:
+                raise ValueError('Неизвестная торговая команда')
+
+    def state(self, admin=False, actor=None):
+        with self._lock:
+            book = []
+            for instrument, name in enumerate(self.scenario.names):
+                row = {'name': name}
+                for side in ('bid', 'ask'):
+                    quote = self.market.book.best(instrument, side)
+                    row[side] = (None if quote is None else
+                                 {'owner': quote.owner, 'price': quote.price,
+                                  'quantity': quote.quantity})
+                book.append(row)
+            visible = range(len(self.market.portfolios)) if admin else (() if actor is None else (actor,))
+            portfolios = {
+                str(index): {'cash': portfolio.cash,
+                             'positions': tuple(portfolio.positions)}
+                for index in visible
+                for portfolio in (self.market.portfolios[index],)
+            }
+            names = {str(index): self.players.get(index, f'Робот {index + 1}')
+                     for index in range(len(self.market.portfolios))}
+            result = self.result
+            scores = self.scores
+            if result is not None and not admin:
+                result = ({str(actor): result[str(actor)]}
+                          if actor is not None else {})
+                scores = ({str(actor): scores[str(actor)]}
+                          if actor is not None else {})
+            return {
+                'phase': self.phase, 'period': self.period,
+                'periods': self.scenario.periods,
+                'remaining': self.remaining, 'book': book,
+                'human_slots': self.human_slots, 'bots': self.bot_count,
+                'seed': self.seed,
+                'players': names, 'connected': tuple(sorted(self.connected)),
+                'portfolios': portfolios, 'actions': tuple(self.actions[-30:]),
+                'result': result, 'scores': scores,
+                'rates': self.scenario.rates,
+                'payments': self.scenario.payments,
+                'hints': self.scenario.hints,
+                'fair_values': tuple(
+                    bond_value(self.scenario, instrument, self.period)
+                    for instrument in range(len(self.scenario.names))),
+            }
+
+    def _record(self, actor, kind, instrument=None, price=None, quantity=None,
+                value=None):
+        self._sequence += 1
+        event = {'sequence': self._sequence, 'actor': actor, 'kind': kind,
+                 'instrument': instrument, 'price': price,
+                 'quantity': quantity, 'value': value}
+        self.actions.append(event)
+        if len(self.actions) > 200:
+            del self.actions[:-200]
+        LOGGER.info('Game event: %s', event)
+
+
+class _RequestHandler(socketserver.StreamRequestHandler):
+    def handle(self):
+        role = None
+        actor = None
+        try:
+            first = self._read()
+            if first.get('type') != 'join':
+                raise ValueError('Первое сообщение должно быть join')
+            role = first.get('role', 'player')
+            if role == 'admin':
+                if first.get('key') != self.server.admin_key:
+                    raise ValueError('Неверный ключ администратора')
+            elif role in ('player', 'host'):
+                actor = self.server.session.join(first.get('name', ''))
+                if role == 'host' and first.get('key') != self.server.admin_key:
+                    raise ValueError('Неверный ключ хоста')
+            else:
+                raise ValueError('Неизвестная роль')
+            self._send({'ok': True, 'actor': actor,
+                        'state': self.server.session.state(role in ('admin', 'host'), actor)})
+            while True:
+                request = self._read()
+                try:
+                    kind = request.get('type')
+                    is_admin = role in ('admin', 'host')
+                    if kind == 'state':
+                        result = self.server.session.state(is_admin, actor)
+                    elif kind == 'trade':
+                        if actor is None:
+                            raise ValueError('Наблюдатель не может торговать')
+                        self.server.session.trade(actor, request)
+                        result = self.server.session.state(is_admin, actor)
+                    elif kind == 'start' and is_admin:
+                        self.server.session.start_or_continue()
+                        result = self.server.session.state(True, actor)
+                    elif kind == 'pause' and is_admin:
+                        self.server.session.toggle_pause()
+                        result = self.server.session.state(True, actor)
+                    elif kind == 'end_period' and is_admin:
+                        self.server.session.end_period()
+                        result = self.server.session.state(True, actor)
+                    else:
+                        raise ValueError('Недоступная команда')
+                    self._send({'ok': True, 'state': result})
+                except (ValueError, TypeError, OrderError) as error:
+                    self._send({'ok': False, 'error': str(error)})
+        except EOFError:
+            pass
+        except (ValueError, TypeError, OrderError) as error:
+            self._send({'ok': False, 'error': str(error)})
+        except (ConnectionError, OSError):
+            pass
+        finally:
+            if actor is not None:
+                self.server.session.disconnect(actor)
+
+    def _read(self):
+        data = self.rfile.readline(MAX_MESSAGE + 1)
+        if not data:
+            raise EOFError
+        if len(data) > MAX_MESSAGE:
+            raise ValueError('Слишком большое сообщение')
+        try:
+            value = json.loads(data.decode('utf-8'))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            raise ValueError('Неверный формат сообщения') from error
+        if not isinstance(value, dict):
+            raise ValueError('Сообщение должно быть объектом')
+        return value
+
+    def _send(self, value):
+        try:
+            self.wfile.write(json.dumps(value, ensure_ascii=False,
+                                        separators=(',', ':')).encode('utf-8') + b'\n')
+            self.wfile.flush()
+        except OSError:
+            pass
+
+
+class _ThreadingServer(socketserver.ThreadingTCPServer):
+    allow_reuse_address = True
+    daemon_threads = True
+
+
+class LanServer:
+    def __init__(self, scenario, host='0.0.0.0', port=DEFAULT_PORT,
+                 human_slots=4, bots=4, seed=0, admin_key=None):
+        self.session = GameSession(scenario, human_slots, bots, seed)
+        self.admin_key = admin_key or secrets.token_urlsafe(6)
+        self._server = _ThreadingServer((host, port), _RequestHandler)
+        self._server.session = self.session
+        self._server.admin_key = self.admin_key
+        self._stop = threading.Event()
+        self._threads = []
+
+    @property
+    def address(self):
+        return self._server.server_address
+
+    def start(self):
+        server_thread = threading.Thread(target=self._server.serve_forever,
+                                         name='fast-lan-server', daemon=True)
+        timer_thread = threading.Thread(target=self._timer,
+                                        name='fast-lan-timer', daemon=True)
+        server_thread.start()
+        timer_thread.start()
+        self._threads = [server_thread, timer_thread]
+        LOGGER.info('LAN server started on %s:%s', *self.address)
+        return self
+
+    def stop(self):
+        self._stop.set()
+        self._server.shutdown()
+        self._server.server_close()
+        for thread in self._threads:
+            thread.join(timeout=2)
+        LOGGER.info('LAN server stopped')
+
+    def _timer(self):
+        previous = time.monotonic()
+        while not self._stop.wait(0.05):
+            current = time.monotonic()
+            try:
+                self.session.tick(current - previous)
+            except Exception:
+                LOGGER.exception('LAN timer failed')
+                return
+            previous = current
+
+
+class LanClient:
+    def __init__(self, host, port=DEFAULT_PORT, name='Игрок', role='player',
+                 key=None, timeout=3):
+        self.socket = socket.create_connection((host, port), timeout=timeout)
+        self.socket.settimeout(timeout)
+        self.file = self.socket.makefile('rwb')
+        self._lock = threading.Lock()
+        welcome = self.request({'type': 'join', 'role': role, 'name': name,
+                                'key': key})
+        self.actor = welcome.get('actor')
+        self.state = welcome['state']
+
+    def request(self, value):
+        with self._lock:
+            self.file.write(json.dumps(value, ensure_ascii=False,
+                                       separators=(',', ':')).encode('utf-8') + b'\n')
+            self.file.flush()
+            data = self.file.readline(MAX_MESSAGE + 1)
+        if not data:
+            raise ConnectionError('Сервер закрыл соединение')
+        response = json.loads(data.decode('utf-8'))
+        if not response.get('ok'):
+            raise ValueError(response.get('error', 'Ошибка сервера'))
+        if 'state' in response:
+            self.state = response['state']
+        return response
+
+    def close(self):
+        try:
+            self.file.close()
+        finally:
+            self.socket.close()
+
+
+def local_address():
+    """Return the address classmates normally use to reach this computer."""
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.connect(('192.0.2.1', 9))
+        return probe.getsockname()[0]
+    except OSError:
+        return '127.0.0.1'
+    finally:
+        probe.close()

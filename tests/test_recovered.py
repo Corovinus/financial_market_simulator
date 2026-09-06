@@ -156,7 +156,9 @@ class OriginalCases(unittest.TestCase):
         level = add_level('Тестовый уровень', scenario)
         try:
             self.assertIsInstance(level, CustomLevel)
-            self.assertIn(('Тестовый уровень', ''), build_groups()[-2][1])
+            custom_group = next(items for name, items in build_groups()
+                                if name == 'Свои уровни')
+            self.assertIn(('Тестовый уровень', ''), custom_group)
         finally:
             del CUSTOM_LEVELS[before:]
 

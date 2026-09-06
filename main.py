@@ -44,6 +44,7 @@ def build_groups():
         ('Опционы', [(f'Case OP{i}', f'Описание OP{i}') for i in range(1, 4)] + [('Опционы', 'Описание TutOP')]),
         ('Эффективность', [(f'Case RE{i}', f'Описание RE{i}') for i in range(1, 4)]),
         ('Свои уровни', [(level.name, '') for level in CUSTOM_LEVELS]),
+        ('Сетевая игра', [('Локальная сеть', '')]),
         ('Конец', []),
     ]
 
@@ -108,6 +109,15 @@ def main():
 
     def description_lines(label_value, prefix):
         """Return a valid reader page even for a custom level."""
+        if label_value == 'Локальная сеть':
+            return [
+                'Локальная сетевая игра', '',
+                'Преподаватель создаёт комнату и наблюдает портфели игроков.',
+                'Игрок-хост получает сбалансированный сценарий по случайному seed.',
+                'Остальные студенты подключаются по адресу IP:порт.',
+                'Все заявки проверяются одним сервером, поэтому книга общая.',
+                'Расширенные настройки описаны в README.md.',
+            ]
         title = next((name for name in sections if prefix and name.startswith(prefix)), None)
         if title:
             return [title, ''] + sections[title].replace('`', '').replace('|', '').splitlines()
@@ -182,7 +192,10 @@ def main():
             return
         LOGGER.info('Module started: %s', label_value)
         try:
-            if label_value in ('Case B01', 'Case B02'):
+            if label_value == 'Локальная сеть':
+                from modules.network_launcher import run_network_launcher
+                run_network_launcher(args.scale)
+            elif label_value in ('Case B01', 'Case B02'):
                 from modules.bidask import run_session
                 run_session(ROOT / f'data/original/{label_value[5:]}.PAR',
                             args.speed, args.scale, close_display=False)
@@ -353,8 +366,11 @@ def main():
             else:
                 text(GROUPS[group][1][row][0], 308, 214, COLORS['accent_alt'], typeface)
                 text('↑ ↓ — выбрать действие   ← — назад', 308, 254, COLORS['muted'], small)
+                actions = (('Описание режима', 'Открыть сетевую игру')
+                           if GROUPS[group][1][row][0] == 'Локальная сеть'
+                           else ('Описание игры', 'Торговая сессия'))
                 for index, (value, rect) in enumerate(zip(
-                        ('Описание игры', 'Торговая сессия'), action_rects())):
+                        actions, action_rects())):
                     rounded(pg, screen, rect, COLORS['accent'] if index == choice else COLORS['background_alt'], 10)
                     if index == choice:
                         pg.draw.rect(screen, COLORS['accent_alt'], (rect.x, rect.y, 4, rect.height), border_radius=2)

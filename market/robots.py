@@ -26,12 +26,18 @@ class RobotController:
     float here, so exact rounding at decision boundaries is not promised.
     """
 
-    def __init__(self, market: Market, seed: int = 0):
+    def __init__(self, market: Market, seed: int = 0, actors=None):
         if not isinstance(market, Market):
             raise TypeError('RobotController expects a Market')
         self.market = market
         self.scenario = market.scenario
         self.rng = OriginalRNG(seed)
+        self.actors = (tuple(range(1, self.scenario.robots + 1))
+                       if actors is None else tuple(actors))
+        if (any(type(actor) is not int or actor <= 0 or
+                actor >= len(market.portfolios) for actor in self.actors) or
+                len(set(self.actors)) != len(self.actors)):
+            raise ValueError('Неверные номера участников-роботов')
         self.elapsed_ticks = 0.0
         self.next_actions = []
         self.values = []
@@ -42,11 +48,11 @@ class RobotController:
             raise ValueError('Неверный период роботов')
         self.elapsed_ticks = 0.0
         self.next_actions = [float(self.scenario.reaction_ticks)
-                             for _ in range(self.scenario.robots)]
+                             for _ in self.actors]
         fair = [bond_value(self.scenario, instrument, period)
                 for instrument in range(len(self.scenario.names))]
         self.values = []
-        for robot in range(self.scenario.robots):
+        for robot, _actor in enumerate(self.actors):
             if robot < self.scenario.wolves:
                 self.values.append(tuple(fair))
             else:
@@ -62,10 +68,10 @@ class RobotController:
         if self.scenario.strategy != 1:
             return ()
         events = []
-        for index in range(self.scenario.robots):
+        for index, actor in enumerate(self.actors):
             if self.elapsed_ticks <= self.next_actions[index]:
                 continue
-            event = self._act(index + 1, self.values[index])
+            event = self._act(actor, self.values[index])
             if event is not None:
                 events.append(event)
             self.next_actions[index] = (self.elapsed_ticks +
