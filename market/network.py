@@ -251,6 +251,19 @@ class GameSession:
                 'fair_values': self._fair_values,
             }
 
+    def replay_frame(self, index):
+        """Return one compact replay snapshot for an administrator."""
+        with self._lock:
+            total = len(self.market.replay_frames)
+            if not total:
+                raise ValueError('Повтор пока пуст')
+            if index == -1:
+                index = total - 1
+            if type(index) is not int or not 0 <= index < total:
+                raise ValueError('Неверный номер события повтора')
+            return {'index': index, 'total': total,
+                    'frame': self.market.replay_frames[index]}
+
     def _calculate_fair_values(self):
         return tuple(bond_value(self.scenario, instrument, self.period)
                      for instrument in range(len(self.scenario.names)))
@@ -297,6 +310,13 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                     is_admin = role in ('admin', 'host')
                     if kind == 'state':
                         result = self.server.session.state(is_admin, actor)
+                    elif kind == 'replay':
+                        if not is_admin:
+                            raise ValueError('Повтор доступен преподавателю')
+                        replay = self.server.session.replay_frame(
+                            request.get('index'))
+                        self._send({'ok': True, 'replay': replay})
+                        continue
                     elif kind == 'trade':
                         if actor is None:
                             raise ValueError('Наблюдатель не может торговать')

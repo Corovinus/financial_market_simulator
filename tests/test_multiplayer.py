@@ -167,6 +167,11 @@ class MultiplayerTests(unittest.TestCase):
                            'price': 90, 'quantity': 2})
             second.request({'type': 'trade', 'kind': 'sell',
                             'instrument': 0, 'quantity': 1})
+            replay = admin.request({'type': 'replay', 'index': -1})['replay']
+            self.assertEqual(replay['index'], replay['total'] - 1)
+            self.assertEqual(replay['frame']['kind'], 'sell')
+            with self.assertRaisesRegex(ValueError, 'преподавателю'):
+                first.request({'type': 'replay', 'index': 0})
             admin_state = admin.request({'type': 'state'})['state']
             first_state = first.request({'type': 'state'})['state']
             self.assertEqual(admin_state['portfolios']['0']['positions'][0], 16)

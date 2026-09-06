@@ -13,6 +13,7 @@ from market.engine import Market
 from market.orderbook import OrderError
 from market.robots import RobotController
 from .display import open_scaled_display, present_scaled
+from .replay import draw_replay_frame
 from .theme import COLORS, card, font, label, mouse_position, rounded
 
 
@@ -60,6 +61,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     last_robot_event = ''
     projected = None
     result_screen = False
+    replay_index = None
+    replay_observed = 0
     running = True
     clock = pg.time.Clock()
 
@@ -88,6 +91,15 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     sell_button = pg.Rect(804, 482, 132, 38)
 
     def draw():
+        if replay_index is not None:
+            players = {str(actor): ('Игрок' if actor == 0 else
+                                    f'Робот {actor + 1}')
+                       for actor in range(len(market.portfolios))}
+            draw_replay_frame(
+                pg, screen, market.replay_frames[replay_index], replay_index,
+                len(market.replay_frames), scenario.names, players,
+                replay_observed, (body_font, small_font, title_font))
+            return
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
@@ -147,6 +159,9 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         action_text = ('Enter — следующий период   Esc — выход' if period + 1 < scenario.periods
                        else 'Enter — завершить попытку   Esc — выход')
         write(action_text, 54, 494, COLORS['muted'], small_font)
+        if result_screen:
+            write('R — посмотреть повтор', 682, 494,
+                  COLORS['accent_alt'], small_font)
         if not result_screen:
             rounded(pg, screen, buy_button, COLORS['buy'], 9)
             rounded(pg, screen, sell_button, COLORS['sell'], 9)
@@ -204,9 +219,27 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if replay_index is not None:
+                if key in (pg.K_ESCAPE, pg.K_r):
+                    replay_index = None
+                elif key == pg.K_LEFT:
+                    replay_index = max(0, replay_index - 1)
+                elif key == pg.K_RIGHT:
+                    replay_index = min(len(market.replay_frames) - 1,
+                                       replay_index + 1)
+                elif key == pg.K_HOME:
+                    replay_index = 0
+                elif key == pg.K_END:
+                    replay_index = len(market.replay_frames) - 1
+                elif key == pg.K_TAB:
+                    replay_observed = ((replay_observed + 1) %
+                                       len(market.portfolios))
+                continue
             if result_screen:
                 if key in (pg.K_ESCAPE, pg.K_e):
                     running = False
+                elif key == pg.K_r:
+                    replay_index = len(market.replay_frames) - 1
                 elif key in (pg.K_RETURN, pg.K_SPACE):
                     if period + 1 < scenario.periods:
                         period += 1

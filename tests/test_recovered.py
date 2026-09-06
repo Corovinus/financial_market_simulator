@@ -162,6 +162,29 @@ class OriginalCases(unittest.TestCase):
         with self.assertRaises(OrderError):
             market.take(1, 0, 'buy', 1)
 
+    def test_replay_captures_each_accepted_market_action(self):
+        scenario = read_par(ROOT / 'data/original/B01.PAR')
+        market = Market(scenario)
+        market.start_period(0)
+        self.assertEqual(market.replay_frames[-1]['kind'], 'start_period')
+        market.submit(0, 0, 'bid', 100, 2)
+        bid_frame = market.replay_frames[-1]
+        self.assertEqual((bid_frame['kind'], bid_frame['actor']), ('bid', 0))
+        self.assertEqual(bid_frame['book'][0][0], (0, 100, 2))
+        before_rejected = len(market.replay_frames)
+        with self.assertRaises(OrderError):
+            market.submit(1, 0, 'bid', 90, 1)
+        self.assertEqual(len(market.replay_frames), before_rejected)
+        market.take(1, 0, 'sell', 1)
+        trade_frame = market.replay_frames[-1]
+        self.assertEqual((trade_frame['kind'], trade_frame['price'],
+                          trade_frame['quantity']), ('sell', 100, 1))
+        self.assertEqual(trade_frame['book'][0][0], (0, 100, 1))
+        self.assertEqual(trade_frame['portfolios'][0][1][0], 16)
+        self.assertEqual(trade_frame['portfolios'][1][1][0], 14)
+        # Earlier frames are snapshots and do not change with the live market.
+        self.assertEqual(bid_frame['book'][0][0], (0, 100, 2))
+
     def test_book_without_ranked_queue_drops_superseded_quote(self):
         from market.orderbook import OrderBook
         book = OrderBook(1, ranked_queue=False)

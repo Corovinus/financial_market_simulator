@@ -33,6 +33,7 @@ class Market:
         self.book = OrderBook(len(scenario.names), scenario.queue)
         self.period = 0
         self.started = False
+        self.replay_frames = []
 
     @property
     def history(self):
@@ -49,10 +50,14 @@ class Market:
             self.period = period
         self.book.reset()
         self.started = True
+        self._record_replay('start_period')
 
     def submit(self, actor, instrument, side, price, quantity):
         self._actor(actor)
-        return self.book.submit(actor, instrument, side, price, quantity)
+        quote = self.book.submit(actor, instrument, side, price, quantity)
+        self._record_replay(side, actor, instrument, quote.price,
+                            quote.quantity)
+        return quote
 
     def take(self, actor, instrument, side, quantity):
         self._actor(actor)
@@ -63,6 +68,8 @@ class Market:
         self.portfolios[buyer].positions[instrument] = _word(self.portfolios[buyer].positions[instrument] + trade.quantity)
         self.portfolios[seller].cash += value
         self.portfolios[seller].positions[instrument] = _word(self.portfolios[seller].positions[instrument] - trade.quantity)
+        self._record_replay(side, actor, instrument, trade.price,
+                            trade.quantity)
         return trade
 
     def quotes(self, instrument, side):
@@ -89,7 +96,33 @@ class Market:
                                      tuple(portfolio.positions), self.period)
         self.book.clear_quotes()
         self.started = False
+        self._record_replay('period_result')
         return projected
+
+    def _record_replay(self, kind, actor=None, instrument=None, price=None,
+                       quantity=None):
+        """Capture the exact book and portfolios after an accepted action."""
+        book = []
+        for number in range(len(self.scenario.names)):
+            row = []
+            for side in ('bid', 'ask'):
+                quote = self.book.best(number, side)
+                row.append(None if quote is None else
+                           (quote.owner, quote.price, quote.quantity))
+            book.append(tuple(row))
+        self.replay_frames.append({
+            'sequence': len(self.replay_frames) + 1,
+            'period': self.period,
+            'kind': kind,
+            'actor': actor,
+            'instrument': instrument,
+            'price': price,
+            'quantity': quantity,
+            'book': tuple(book),
+            'portfolios': tuple(
+                (portfolio.cash, tuple(portfolio.positions))
+                for portfolio in self.portfolios),
+        })
 
     def score(self, capital):
         """Score thresholds stored in PAR (B01/B02: 0, 0, 10000, 6)."""

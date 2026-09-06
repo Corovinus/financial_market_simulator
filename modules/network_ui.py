@@ -5,6 +5,7 @@ import time
 
 from market.config import parse_offer
 from .display import open_scaled_display, present_scaled
+from .replay import draw_replay_frame
 from .theme import COLORS, card, font, label, rounded
 
 
@@ -34,6 +35,8 @@ def run_network_client(client, role='player', scale=1.0,
     updates = queue.SimpleQueue()
     network_stop = threading.Event()
     network_failed = False
+    replay_data = None
+    replay_observed = 0
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -66,6 +69,8 @@ def run_network_client(client, role='player', scale=1.0,
                 response = client.request(payload)
                 if 'state' in response:
                     updates.put(('state', response['state']))
+                elif 'replay' in response:
+                    updates.put(('replay', response['replay']))
             except ValueError as error:
                 updates.put(('error', str(error)))
             except (OSError, ConnectionError) as error:
@@ -82,6 +87,13 @@ def run_network_client(client, role='player', scale=1.0,
 
     def draw(state):
         nonlocal observed
+        if replay_data is not None:
+            names = tuple(row['name'] for row in state['book'])
+            draw_replay_frame(
+                pg, screen, replay_data['frame'], replay_data['index'],
+                replay_data['total'], names, state['players'],
+                replay_observed, (body, small, title))
+            return
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, (27, 64, 103), (900, 0), 260)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
@@ -201,6 +213,9 @@ def run_network_client(client, role='player', scale=1.0,
                 if is_admin and state['phase'] == 'result':
                     write('Enter — следующий период', 220, 340,
                           COLORS['warning'], small)
+                if is_admin:
+                    write('R — повтор сессии', 220, 362,
+                          COLORS['accent_alt'], small)
 
         rounded(pg, screen, pg.Rect(24, 530, 912, 52), COLORS['panel'], 10)
         if input_mode:
@@ -229,6 +244,8 @@ def run_network_client(client, role='player', scale=1.0,
                 break
             if update == 'state':
                 state = value
+            elif update == 'replay':
+                replay_data = value
             elif update == 'error':
                 message(value, 5)
             else:
@@ -241,6 +258,22 @@ def run_network_client(client, role='player', scale=1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if replay_data is not None:
+                if key in (pg.K_ESCAPE, pg.K_r):
+                    replay_data = None
+                elif key in (pg.K_LEFT, pg.K_RIGHT, pg.K_HOME, pg.K_END):
+                    if key == pg.K_HOME:
+                        target = 0
+                    elif key == pg.K_END:
+                        target = -1
+                    else:
+                        target = replay_data['index'] + (-1 if key == pg.K_LEFT else 1)
+                        target = max(0, min(replay_data['total'] - 1, target))
+                    send({'type': 'replay', 'index': target})
+                elif key == pg.K_TAB:
+                    replay_observed = ((replay_observed + 1) %
+                                       len(replay_data['frame']['portfolios']))
+                continue
             if input_mode:
                 if key == pg.K_ESCAPE:
                     input_mode, input_text = None, ''
@@ -269,6 +302,9 @@ def run_network_client(client, role='player', scale=1.0,
                 continue
             if key == pg.K_ESCAPE:
                 running = False
+            elif (key == pg.K_r and is_admin and
+                  state['phase'] in ('running', 'paused', 'result', 'finished')):
+                send({'type': 'replay', 'index': -1})
             elif is_admin and state['phase'] in ('lobby', 'result') and key == pg.K_RETURN:
                 send({'type': 'start'})
             elif is_admin and state['phase'] in ('running', 'paused') and key == pg.K_SPACE:
