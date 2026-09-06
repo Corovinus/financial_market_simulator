@@ -4,8 +4,10 @@ import threading
 import time
 
 from market.config import parse_offer
+from market.report import default_report_folder, export_report
 from .display import open_scaled_display, present_scaled
 from .replay import draw_replay_frame
+from .report import draw_report
 from .theme import COLORS, card, font, label, rounded
 
 
@@ -37,6 +39,9 @@ def run_network_client(client, role='player', scale=1.0,
     network_failed = False
     replay_data = None
     replay_observed = 0
+    report_data = None
+    report_instrument = 0
+    report_notice = ''
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -71,6 +76,8 @@ def run_network_client(client, role='player', scale=1.0,
                     updates.put(('state', response['state']))
                 elif 'replay' in response:
                     updates.put(('replay', response['replay']))
+                elif 'report' in response:
+                    updates.put(('report', response['report']))
             except ValueError as error:
                 updates.put(('error', str(error)))
             except (OSError, ConnectionError) as error:
@@ -87,6 +94,11 @@ def run_network_client(client, role='player', scale=1.0,
 
     def draw(state):
         nonlocal observed
+        if report_data is not None:
+            draw_report(pg, screen, report_data, report_instrument,
+                        (body, small, title), report_notice,
+                        can_switch=is_admin)
+            return
         if replay_data is not None:
             names = tuple(row['name'] for row in state['book'])
             draw_replay_frame(
@@ -216,6 +228,9 @@ def run_network_client(client, role='player', scale=1.0,
                 if is_admin:
                     write('R — повтор сессии', 220, 362,
                           COLORS['accent_alt'], small)
+                if state['period'] + 1 == state['periods']:
+                    write('F2 — итоговый отчёт', 430, 362,
+                          COLORS['accent_alt'], small)
 
         rounded(pg, screen, pg.Rect(24, 530, 912, 52), COLORS['panel'], 10)
         if input_mode:
@@ -246,6 +261,9 @@ def run_network_client(client, role='player', scale=1.0,
                 state = value
             elif update == 'replay':
                 replay_data = value
+            elif update == 'report':
+                report_data = value
+                report_notice = ''
             elif update == 'error':
                 message(value, 5)
             else:
@@ -258,6 +276,26 @@ def run_network_client(client, role='player', scale=1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if report_data is not None:
+                if key == pg.K_ESCAPE:
+                    report_data = None
+                    report_notice = ''
+                elif key == pg.K_UP:
+                    report_instrument = ((report_instrument - 1) %
+                                         len(report_data['instruments']))
+                elif key == pg.K_DOWN:
+                    report_instrument = ((report_instrument + 1) %
+                                         len(report_data['instruments']))
+                elif key == pg.K_TAB and is_admin:
+                    actors = sorted(int(value) for value in state['players'])
+                    current = report_data['actor']
+                    target = actors[(actors.index(current) + 1) % len(actors)]
+                    send({'type': 'report', 'actor': target})
+                elif key == pg.K_F3:
+                    paths = export_report(report_data,
+                                          default_report_folder())
+                    report_notice = f'Сохранено: {paths[0].parent}'
+                continue
             if replay_data is not None:
                 if key in (pg.K_ESCAPE, pg.K_r):
                     replay_data = None
@@ -305,6 +343,9 @@ def run_network_client(client, role='player', scale=1.0,
             elif (key == pg.K_r and is_admin and
                   state['phase'] in ('running', 'paused', 'result', 'finished')):
                 send({'type': 'replay', 'index': -1})
+            elif (key == pg.K_F2 and state['phase'] in ('result', 'finished') and
+                  state['period'] + 1 == state['periods']):
+                send({'type': 'report', 'actor': observed})
             elif is_admin and state['phase'] in ('lobby', 'result') and key == pg.K_RETURN:
                 send({'type': 'start'})
             elif is_admin and state['phase'] in ('running', 'paused') and key == pg.K_SPACE:

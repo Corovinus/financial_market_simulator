@@ -69,7 +69,7 @@ class Market:
         self.portfolios[seller].cash += value
         self.portfolios[seller].positions[instrument] = _word(self.portfolios[seller].positions[instrument] - trade.quantity)
         self._record_replay(side, actor, instrument, trade.price,
-                            trade.quantity)
+                            trade.quantity, trade.buyer, trade.seller)
         return trade
 
     def quotes(self, instrument, side):
@@ -100,7 +100,7 @@ class Market:
         return projected
 
     def _record_replay(self, kind, actor=None, instrument=None, price=None,
-                       quantity=None):
+                       quantity=None, buyer=None, seller=None):
         """Capture the exact book and portfolios after an accepted action."""
         book = []
         for number in range(len(self.scenario.names)):
@@ -118,6 +118,8 @@ class Market:
             'instrument': instrument,
             'price': price,
             'quantity': quantity,
+            'buyer': buyer,
+            'seller': seller,
             'book': tuple(book),
             'portfolios': tuple(
                 (portfolio.cash, tuple(portfolio.positions))

@@ -11,9 +11,11 @@ from market.calculations import bond_value
 from market.config import parse_offer, read_par, Scenario
 from market.engine import Market
 from market.orderbook import OrderError
+from market.report import build_report, default_report_folder, export_report
 from market.robots import RobotController
 from .display import open_scaled_display, present_scaled
 from .replay import draw_replay_frame
+from .report import draw_report
 from .theme import COLORS, card, font, label, mouse_position, rounded
 
 
@@ -63,6 +65,10 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     result_screen = False
     replay_index = None
     replay_observed = 0
+    report_data = None
+    report_actor = 0
+    report_instrument = 0
+    report_notice = ''
     running = True
     clock = pg.time.Clock()
 
@@ -91,6 +97,10 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     sell_button = pg.Rect(804, 482, 132, 38)
 
     def draw():
+        if report_data is not None:
+            draw_report(pg, screen, report_data, report_instrument,
+                        (body_font, small_font, title_font), report_notice)
+            return
         if replay_index is not None:
             players = {str(actor): ('Игрок' if actor == 0 else
                                     f'Робот {actor + 1}')
@@ -160,8 +170,11 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                        else 'Enter — завершить попытку   Esc — выход')
         write(action_text, 54, 494, COLORS['muted'], small_font)
         if result_screen:
-            write('R — посмотреть повтор', 682, 494,
+            write('R — посмотреть повтор', 682, 472,
                   COLORS['accent_alt'], small_font)
+            if period + 1 == scenario.periods:
+                write('F2 — итоговый отчёт', 682, 494,
+                      COLORS['accent_alt'], small_font)
         if not result_screen:
             rounded(pg, screen, buy_button, COLORS['buy'], 9)
             rounded(pg, screen, sell_button, COLORS['sell'], 9)
@@ -219,6 +232,30 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
+            if report_data is not None:
+                if key == pg.K_ESCAPE:
+                    report_data = None
+                    report_notice = ''
+                elif key == pg.K_UP:
+                    report_instrument = ((report_instrument - 1) %
+                                         len(report_data['instruments']))
+                elif key == pg.K_DOWN:
+                    report_instrument = ((report_instrument + 1) %
+                                         len(report_data['instruments']))
+                elif key == pg.K_TAB:
+                    report_actor = ((report_actor + 1) %
+                                    len(market.portfolios))
+                    report_data = build_report(
+                        scenario, market.replay_frames, report_actor,
+                        {str(actor): ('Игрок' if actor == 0 else
+                                     f'Робот {actor + 1}')
+                         for actor in range(len(market.portfolios))})
+                    report_notice = ''
+                elif key == pg.K_F3:
+                    paths = export_report(report_data,
+                                          default_report_folder())
+                    report_notice = f'Сохранено: {paths[0].parent}'
+                continue
             if replay_index is not None:
                 if key in (pg.K_ESCAPE, pg.K_r):
                     replay_index = None
@@ -240,6 +277,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                     running = False
                 elif key == pg.K_r:
                     replay_index = len(market.replay_frames) - 1
+                elif key == pg.K_F2 and period + 1 == scenario.periods:
+                    report_data = build_report(
+                        scenario, market.replay_frames, report_actor,
+                        {str(actor): ('Игрок' if actor == 0 else
+                                     f'Робот {actor + 1}')
+                         for actor in range(len(market.portfolios))})
                 elif key in (pg.K_RETURN, pg.K_SPACE):
                     if period + 1 < scenario.periods:
                         period += 1

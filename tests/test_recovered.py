@@ -8,6 +8,7 @@ from market.calculations import bond_value, settle, future_capital
 from market.rng import OriginalRNG
 from market.engine import Market
 from market.orderbook import OrderError
+from market.report import build_report, export_report
 from market.robots import RobotController
 from modules.educational import (
     binomial_option, capm_statistics, information_expected_value,
@@ -184,6 +185,33 @@ class OriginalCases(unittest.TestCase):
         self.assertEqual(trade_frame['portfolios'][1][1][0], 14)
         # Earlier frames are snapshots and do not change with the live market.
         self.assertEqual(bid_frame['book'][0][0], (0, 100, 2))
+
+    def test_final_report_attributes_trade_result_and_exports(self):
+        scenario = Scenario(
+            periods=1, duration_ticks=10, rates=(10,), names=('Бумага',),
+            payments=((150,),), cash=1000, positions=(0,),
+            score_parameters=(0, 0, 2000, 10), queue=True, robots=1,
+            wolves=0, reaction_ticks=10, strategy=0, hints=True)
+        market = Market(scenario)
+        market.start_period(0)
+        market.submit(0, 0, 'bid', 100, 1)
+        market.take(1, 0, 'sell', 1)
+        market.finish_period()
+        buyer = build_report(scenario, market.replay_frames, 0,
+                             {'0': 'Покупатель', '1': 'Продавец'})
+        seller = build_report(scenario, market.replay_frames, 1,
+                              {'0': 'Покупатель', '1': 'Продавец'})
+        self.assertEqual((buyer['initial_capital'], buyer['final_capital']),
+                         (1100, 1140))
+        self.assertAlmostEqual(buyer['change'], 40)
+        self.assertAlmostEqual(buyer['realized'], 40)
+        self.assertAlmostEqual(seller['realized'], -40)
+        self.assertEqual((buyer['rank'], seller['rank']), (1, 2))
+        self.assertEqual((buyer['trade_count'], buyer['average_buy']), (1, 100))
+        with tempfile.TemporaryDirectory() as folder:
+            csv_path, html_path = export_report(buyer, folder)
+            self.assertIn('Покупатель', csv_path.read_text(encoding='utf-8-sig'))
+            self.assertIn('<svg', html_path.read_text(encoding='utf-8'))
 
     def test_book_without_ranked_queue_drops_superseded_quote(self):
         from market.orderbook import OrderBook

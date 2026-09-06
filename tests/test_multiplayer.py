@@ -4,7 +4,7 @@ import socket
 import unittest
 from unittest.mock import patch
 
-from market.config import read_par
+from market.config import Scenario, read_par
 from market.generator import generate_scenario
 from market.network import (
     GameSession, LanClient, LanServer, discover_games, parse_endpoint,
@@ -188,6 +188,40 @@ class MultiplayerTests(unittest.TestCase):
             self.assertEqual(set(player_result), {'1'})
         finally:
             for client in (second, first, admin):
+                if client is not None:
+                    client.close()
+            server.stop()
+
+    def test_network_final_report_is_scoped_to_player(self):
+        scenario = Scenario(
+            periods=1, duration_ticks=10, rates=(10,), names=('Бумага',),
+            payments=((150,),), cash=1000, positions=(0,),
+            score_parameters=(0, 0, 2000, 10), queue=True, robots=1,
+            wolves=0, reaction_ticks=10, strategy=0, hints=True)
+        server = LanServer(scenario, host='127.0.0.1', port=0,
+                           human_slots=2, bots=0, discovery=False).start()
+        admin = buyer = seller = None
+        try:
+            port = server.address[1]
+            admin = LanClient('127.0.0.1', port, role='admin',
+                              key=server.admin_key)
+            buyer = LanClient('127.0.0.1', port, name='Покупатель')
+            seller = LanClient('127.0.0.1', port, name='Продавец')
+            admin.request({'type': 'start'})
+            buyer.request({'type': 'trade', 'kind': 'bid', 'instrument': 0,
+                           'price': 100, 'quantity': 1})
+            seller.request({'type': 'trade', 'kind': 'sell', 'instrument': 0,
+                            'quantity': 1})
+            admin.request({'type': 'end_period'})
+            teacher_report = admin.request(
+                {'type': 'report', 'actor': seller.actor})['report']
+            player_report = buyer.request(
+                {'type': 'report', 'actor': seller.actor})['report']
+            self.assertEqual(teacher_report['actor'], seller.actor)
+            self.assertEqual(player_report['actor'], buyer.actor)
+            self.assertEqual(player_report['name'], 'Покупатель')
+        finally:
+            for client in (seller, buyer, admin):
                 if client is not None:
                     client.close()
             server.stop()
