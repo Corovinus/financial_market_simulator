@@ -178,7 +178,8 @@ def _font(pg, path: Path):
     return glyphs
 
 
-def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
+def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
+               close_display: bool = True):
     """Run one of the recovered teaching tabs and return its last result."""
     title, purpose, fields = _spec(label)
     if not isinstance(speed, (int, float)) or speed <= 0:
@@ -380,5 +381,6 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
             write("Ввод: " + input_text + "_", 52, 503, COLORS['text'], body_font)
         present_scaled(pg, screen, window)
         clock.tick(max(1, int(30 * max(0.1, min(float(speed), 10.0)))))
-    pg.quit()
+    if close_display:
+        pg.quit()
     return last

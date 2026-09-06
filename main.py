@@ -156,13 +156,15 @@ def main():
             from modules.introduction import run_introduction
             LOGGER.info('Module started: introduction')
             try:
-                run_introduction(args.speed, args.scale)
+                run_introduction(args.speed, args.scale, close_display=False)
             except Exception:
                 LOGGER.exception('Module failed: introduction')
                 raise
             reset_display()
             mode = 'main'
-            LOGGER.info('Module closed: introduction')
+            pg.event.clear()
+            LOGGER.info('Module closed: introduction; main display restored=%s',
+                        pg.display.get_init())
             return
         if group >= 2:
             mode, choice = 'action', 0
@@ -183,22 +185,26 @@ def main():
             if label_value in ('Case B01', 'Case B02'):
                 from modules.bidask import run_session
                 run_session(ROOT / f'data/original/{label_value[5:]}.PAR',
-                            args.speed, args.scale)
+                            args.speed, args.scale, close_display=False)
             else:
                 custom = next((level for level in CUSTOM_LEVELS
                                if level.name == label_value), None)
                 if custom is not None:
                     from modules.bidask import run_session
-                    run_session(custom.scenario, args.speed, args.scale)
+                    run_session(custom.scenario, args.speed, args.scale,
+                                close_display=False)
                 else:
                     from modules.workshops import run_module
-                    run_module(label_value, args.speed, args.scale)
+                    run_module(label_value, args.speed, args.scale,
+                               close_display=False)
         except Exception:
             LOGGER.exception('Module failed: %s', label_value)
             raise
         reset_display()
         mode = 'main'
-        LOGGER.info('Module closed: %s', label_value)
+        pg.event.clear()
+        LOGGER.info('Module closed: %s; main display restored=%s',
+                    label_value, pg.display.get_init())
 
     def click_action(position):
         """Make the menu usable with a mouse without changing keyboard flow."""

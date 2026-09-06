@@ -176,7 +176,8 @@ def _quantity(value):
     return result
 
 
-def run_introduction(speed: float = 1.0, scale: float = 1.0):
+def run_introduction(speed: float = 1.0, scale: float = 1.0,
+                     close_display: bool = True):
     """Run the guided lesson; F10/Esc opens the DOS-style exit confirmation."""
     if not isinstance(speed, (int, float)) or speed <= 0:
         raise ValueError("Скорость должна быть положительной")
@@ -449,4 +450,5 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0):
         draw()
         present_scaled(pg, screen, window)
         clock.tick(max(1, int(30 * max(0.1, min(float(speed), 10.0)))))
-    pg.quit()
+    if close_display:
+        pg.quit()

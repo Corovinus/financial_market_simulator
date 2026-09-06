@@ -36,7 +36,8 @@ def _font(pygame, path: Path):
     return glyphs
 
 
-def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: float = 1.0):
+def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
+                scale: float = 1.0, close_display: bool = True):
     """Run one B01/B02 attempt and return the final capital.
 
     ``speed`` scales the original decisecond clock.  The default therefore
@@ -252,5 +253,6 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
         draw()
         present_scaled(pg, screen, window)
     final_capital = market.portfolios[0].cash
-    pg.quit()
+    if close_display:
+        pg.quit()
     return final_capital
