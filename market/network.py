@@ -1,5 +1,6 @@
 """Authoritative local-network session and a small JSON-over-TCP protocol."""
 from dataclasses import replace
+import ipaddress
 import json
 import logging
 import math
@@ -454,14 +455,31 @@ class LanClient:
 
 def local_address():
     """Return the address classmates normally use to reach this computer."""
+    candidates = set()
+    try:
+        candidates.update(item[4][0] for item in socket.getaddrinfo(
+            socket.gethostname(), None, socket.AF_INET))
+    except OSError:
+        pass
     probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
     try:
         probe.connect(('192.0.2.1', 9))
-        return probe.getsockname()[0]
+        candidates.add(probe.getsockname()[0])
     except OSError:
-        return '127.0.0.1'
+        pass
     finally:
         probe.close()
+    usable = [value for value in candidates
+              if not ipaddress.ip_address(value).is_loopback]
+    if not usable:
+        return '127.0.0.1'
+    # Most classroom routers use 192.168/16. Prefer it over addresses commonly
+    # installed by VPN clients, while keeping all adapters in discovery below.
+    return min(usable, key=lambda value: (
+        0 if value.startswith('192.168.') else
+        1 if value.startswith('10.') else
+        2 if ipaddress.ip_address(value).is_private else 3,
+        tuple(int(part) for part in value.split('.'))))
 
 
 def discover_games(timeout=0.5, targets=None):
@@ -503,6 +521,11 @@ def discover_games(timeout=0.5, targets=None):
                 data, address = probe.recvfrom(4096)
             except socket.timeout:
                 break
+            except OSError as error:
+                if getattr(error, 'winerror', None) == 10054:
+                    LOGGER.debug('A discovery route rejected the UDP probe')
+                    continue
+                raise
             try:
                 room = json.loads(data.decode('utf-8'))
                 if (room.get('protocol') != 'FAST_LAN_V1' or

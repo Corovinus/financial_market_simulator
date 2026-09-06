@@ -1,6 +1,7 @@
 """In-app launcher, room browser and teacher settings for LAN games."""
 from dataclasses import replace
 import getpass
+import logging
 from pathlib import Path
 import threading
 import time
@@ -16,6 +17,7 @@ from .theme import COLORS, card, font, label, mouse_position, rounded
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LOGGER = logging.getLogger('fast.network.launcher')
 
 
 def _endpoint(value):
@@ -51,6 +53,7 @@ def run_network_launcher(scale=1.0):
     mode = 'menu'
     field = -1
     address = ''
+    own_address = local_address()
     player_name = getpass.getuser()[:24]
     rooms = []
     room_index = 0
@@ -68,6 +71,8 @@ def run_network_launcher(scale=1.0):
     connect_button = pg.Rect(712, 489, 164, 38)
     start_button = pg.Rect(706, 492, 170, 38)
     back_button = pg.Rect(804, 30, 104, 34)
+    address_field = pg.Rect(92, 354, 776, 46)
+    name_field = pg.Rect(92, 421, 776, 46)
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -91,8 +96,9 @@ def run_network_launcher(scale=1.0):
                 rooms = discover_games()
                 room_index = min(room_index, max(0, len(rooms) - 1))
                 status = '' if rooms else 'Открытые игры пока не найдены'
-            except OSError as error:
-                status = f'Поиск недоступен: {error}'
+            except OSError:
+                LOGGER.warning('Room discovery failed', exc_info=True)
+                status = 'Поиск недоступен. Адрес сервера можно ввести вручную.'
             finally:
                 searching = False
 
@@ -190,9 +196,9 @@ def run_network_launcher(scale=1.0):
                         if pg.Rect(92, 154 + offset * 58, 776, 48).collidepoint(position):
                             room_index, field = room_start + offset, -1
                             address = room['address']
-                    if pg.Rect(92, 354, 776, 46).collidepoint(position):
+                    if address_field.collidepoint(position):
                         field = 0
-                    elif pg.Rect(92, 421, 776, 46).collidepoint(position):
+                    elif name_field.collidepoint(position):
                         field = 1
                     elif connect_button.collidepoint(position) and address and player_name:
                         try_action(join)
@@ -227,6 +233,16 @@ def run_network_launcher(scale=1.0):
                     refresh_rooms()
                 elif event.key == pg.K_TAB:
                     field = 0 if field == -1 else (field + 1) % 2
+                elif event.key == pg.K_DELETE and field >= 0:
+                    if field == 0:
+                        address = ''
+                    else:
+                        player_name = ''
+                elif event.key == pg.K_a and event.mod & pg.KMOD_CTRL and field >= 0:
+                    if field == 0:
+                        address = ''
+                    else:
+                        player_name = ''
                 elif field == -1 and event.key in (pg.K_UP, pg.K_DOWN) and rooms:
                     room_index = (room_index + (1 if event.key == pg.K_DOWN else -1)) % len(rooms)
                     address = rooms[room_index]['address']
@@ -276,8 +292,9 @@ def run_network_launcher(scale=1.0):
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write('Сетевая игра', 48, 30, COLORS['accent'], title)
         if mode == 'menu':
-            write('Локальная студенческая сеть', 650, 39, COLORS['muted'], small)
+            write(f'Ваш IP: {own_address}', 682, 39, COLORS['muted'], small)
         else:
+            write(f'Ваш IP: {own_address}', 590, 39, COLORS['muted'], small)
             rounded(pg, screen, back_button, COLORS['background_alt'], 8)
             rounded(pg, screen, back_button, COLORS['border'], 8, 1)
             write('← Назад', back_button.x + 14, back_button.y + 8,
@@ -317,21 +334,25 @@ def run_network_launcher(scale=1.0):
             if not rooms:
                 write('Комнаты появятся здесь автоматически', 108, 174,
                       COLORS['muted'], small)
-            for index, (caption, value) in enumerate((('IP или IP:порт', address),
+            for index, (caption, value) in enumerate((('Адрес сервера (IP или IP:порт)', address),
                                                        ('Имя игрока', player_name))):
                 y = 354 + index * 67
                 write(caption, 96, y - 20, COLORS['muted'], small)
-                rounded(pg, screen, pg.Rect(92, y, 776, 46),
+                input_rect = address_field if index == 0 else name_field
+                rounded(pg, screen, input_rect,
                         COLORS['background_alt'], 8)
-                rounded(pg, screen, pg.Rect(92, y, 776, 46),
+                rounded(pg, screen, input_rect,
                         COLORS['accent'] if field == index else COLORS['border'],
                         8, 2)
-                shown = value or ('192.168.1.25:8765' if index == 0 else '')
+                shown = value or ('например, 192.168.1.25:8765' if index == 0 else '')
                 write(shown + ('_' if field == index else ''), 108, y + 12,
-                      COLORS['text'], small)
-            rounded(pg, screen, connect_button, COLORS['accent'], 8)
-            write('Подключиться', 730, 499, COLORS['white'], small)
-            write('↑↓ игра · Tab поля · Enter подключиться · Esc назад',
+                      COLORS['muted'] if not value else COLORS['text'], small)
+            can_connect = bool(address and player_name)
+            rounded(pg, screen, connect_button,
+                    COLORS['accent'] if can_connect else COLORS['background_alt'], 8)
+            write('Подключиться', 730, 499,
+                  COLORS['white'] if can_connect else COLORS['muted'], small)
+            write('↑↓ игра · Tab поля · Ctrl+A / Delete — очистить · Esc назад',
                   88, 518, COLORS['muted'], small)
         else:
             card(pg, screen, pg.Rect(60, 96, 840, 448),
@@ -357,6 +378,8 @@ def run_network_launcher(scale=1.0):
                   82, 506, COLORS['muted'], small)
 
         if status:
-            write(status[:100], 72, 558, COLORS['danger'], small)
+            status_color = (COLORS['muted'] if status == 'Открытые игры пока не найдены'
+                            else COLORS['danger'])
+            write(status[:100], 72, 558, status_color, small)
         present_scaled(pg, screen, window)
         clock.tick(60)

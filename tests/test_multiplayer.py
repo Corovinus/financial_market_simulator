@@ -1,6 +1,8 @@
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
+import socket
 import unittest
+from unittest.mock import patch
 
 from market.config import read_par
 from market.generator import generate_scenario
@@ -12,6 +14,36 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MultiplayerTests(unittest.TestCase):
+    def test_discovery_ignores_rejected_vpn_route(self):
+        class Probe:
+            calls = 0
+
+            def setsockopt(self, *_args):
+                pass
+
+            def bind(self, *_args):
+                pass
+
+            def sendto(self, *_args):
+                pass
+
+            def settimeout(self, *_args):
+                pass
+
+            def recvfrom(self, *_args):
+                self.calls += 1
+                if self.calls == 1:
+                    error = OSError(10054, 'VPN route rejected the probe')
+                    error.winerror = 10054
+                    raise error
+                raise socket.timeout
+
+            def close(self):
+                pass
+
+        with patch('market.network.socket.socket', return_value=Probe()):
+            self.assertEqual(discover_games(.1, targets=('192.168.1.255',)), [])
+
     def test_teacher_settings_change_pacing_without_changing_payments(self):
         settings = {'scenario': 'B02', 'duration': 90, 'reaction': 4,
                     'queue': False, 'hints': False}
