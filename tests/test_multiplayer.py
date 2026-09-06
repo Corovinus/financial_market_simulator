@@ -6,7 +6,9 @@ from unittest.mock import patch
 
 from market.config import read_par
 from market.generator import generate_scenario
-from market.network import GameSession, LanClient, LanServer, discover_games
+from market.network import (
+    GameSession, LanClient, LanServer, discover_games, parse_endpoint,
+)
 from modules.network_launcher import teacher_scenario
 
 
@@ -14,6 +16,15 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class MultiplayerTests(unittest.TestCase):
+    def test_endpoint_validation(self):
+        self.assertEqual(parse_endpoint('192.168.1.5'),
+                         ('192.168.1.5', 8765))
+        self.assertEqual(parse_endpoint('localhost:9000'),
+                         ('localhost', 9000))
+        for value in ('', ':8765', 'localhost:no', 'localhost:70000'):
+            with self.subTest(value=value), self.assertRaises(ValueError):
+                parse_endpoint(value)
+
     def test_discovery_ignores_rejected_vpn_route(self):
         class Probe:
             calls = 0
@@ -104,6 +115,19 @@ class MultiplayerTests(unittest.TestCase):
         game.tick(scenario.duration_ticks / 10)
         self.assertEqual(game.phase, 'result')
         self.assertEqual(len(game.result), 4)
+
+    def test_started_session_requires_private_reconnect_token(self):
+        scenario = read_par(ROOT / 'data/original/B01.PAR')
+        game = GameSession(scenario, human_slots=1, bots=0)
+        actor = game.join('Алиса')
+        token = game.reconnect_tokens[actor]
+        game.start_or_continue()
+        game.disconnect(actor)
+        with self.assertRaisesRegex(ValueError, 'ключ'):
+            game.join('Алиса')
+        with self.assertRaisesRegex(ValueError, 'ключ'):
+            game.join('Алиса', 'чужой ключ')
+        self.assertEqual(game.join('Алиса', token), actor)
 
     def test_simultaneous_quotes_are_serialized(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')

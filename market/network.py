@@ -24,6 +24,23 @@ DISCOVERY_REQUEST = b'FAST_DISCOVER_V1'
 MAX_MESSAGE = 65_536
 
 
+def parse_endpoint(value, default_port=DEFAULT_PORT):
+    """Parse an IPv4/hostname endpoint accepted by both launchers."""
+    if not isinstance(value, str) or not value.strip():
+        raise ValueError('Введите адрес сервера')
+    value = value.strip()
+    host, separator, port_text = value.rpartition(':')
+    if separator:
+        if not host or not port_text.isdigit():
+            raise ValueError('Адрес должен иметь вид IP или IP:порт')
+        port = int(port_text)
+    else:
+        host, port = value, default_port
+    if type(port) is not int or not 1 <= port <= 65535:
+        raise ValueError('Порт должен быть от 1 до 65535')
+    return host, port
+
+
 class GameSession:
     """One synchronized market shared by player and administrator clients."""
 
@@ -46,6 +63,7 @@ class GameSession:
         self.remaining = float(self.scenario.duration_ticks)
         self.phase = 'lobby'
         self.players = {}
+        self.reconnect_tokens = {}
         self.connected = set()
         self.actions = []
         self.result = None
@@ -53,8 +71,9 @@ class GameSession:
         self._robots = None
         self._sequence = 0
         self._lock = threading.RLock()
+        self._fair_values = self._calculate_fair_values()
 
-    def join(self, name):
+    def join(self, name, reconnect_token=None):
         clean = str(name).strip()[:24]
         if not clean:
             raise ValueError('Введите имя игрока')
@@ -65,6 +84,10 @@ class GameSession:
                              None)
                 if actor is None:
                     raise ValueError('Игра уже началась')
+                expected = self.reconnect_tokens.get(actor, '')
+                supplied = str(reconnect_token or '').encode('utf-8')
+                if not secrets.compare_digest(expected.encode('utf-8'), supplied):
+                    raise ValueError('Неверный ключ переподключения')
                 self.connected.add(actor)
                 self._record(actor, 'reconnect')
                 return actor
@@ -75,6 +98,7 @@ class GameSession:
             if actor is None:
                 raise ValueError('Свободных мест нет')
             self.players[actor] = clean
+            self.reconnect_tokens[actor] = secrets.token_urlsafe(24)
             self.connected.add(actor)
             self._record(actor, 'join')
             return actor
@@ -84,6 +108,7 @@ class GameSession:
             self.connected.discard(actor)
             if self.phase == 'lobby':
                 self.players.pop(actor, None)
+                self.reconnect_tokens.pop(actor, None)
             self._record(actor, 'disconnect')
 
     def start_or_continue(self):
@@ -107,6 +132,7 @@ class GameSession:
                     self.period += 1
                     self.market.start_period(self.period)
                     self._robots.start_period(self.period)
+                    self._fair_values = self._calculate_fair_values()
                     self.remaining = float(self.scenario.duration_ticks)
                     self.result = None
                     self.scores = None
@@ -222,10 +248,12 @@ class GameSession:
                 'rates': self.scenario.rates,
                 'payments': self.scenario.payments,
                 'hints': self.scenario.hints,
-                'fair_values': tuple(
-                    bond_value(self.scenario, instrument, self.period)
-                    for instrument in range(len(self.scenario.names))),
+                'fair_values': self._fair_values,
             }
+
+    def _calculate_fair_values(self):
+        return tuple(bond_value(self.scenario, instrument, self.period)
+                     for instrument in range(len(self.scenario.names)))
 
     def _record(self, actor, kind, instrument=None, price=None, quantity=None,
                 value=None):
@@ -252,12 +280,15 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 if first.get('key') != self.server.admin_key:
                     raise ValueError('Неверный ключ администратора')
             elif role in ('player', 'host'):
-                actor = self.server.session.join(first.get('name', ''))
                 if role == 'host' and first.get('key') != self.server.admin_key:
                     raise ValueError('Неверный ключ хоста')
+                actor = self.server.session.join(
+                    first.get('name', ''), first.get('reconnect_token'))
             else:
                 raise ValueError('Неизвестная роль')
             self._send({'ok': True, 'actor': actor,
+                        'reconnect_token': (self.server.session.reconnect_tokens.get(actor)
+                                            if actor is not None else None),
                         'state': self.server.session.state(role in ('admin', 'host'), actor)})
             while True:
                 request = self._read()
@@ -420,15 +451,26 @@ class LanServer:
 
 
 class LanClient:
+    _reconnect_tokens = {}
+
     def __init__(self, host, port=DEFAULT_PORT, name='Игрок', role='player',
-                 key=None, timeout=3):
+                 key=None, timeout=3, reconnect_token=None):
         self.socket = socket.create_connection((host, port), timeout=timeout)
         self.socket.settimeout(timeout)
         self.file = self.socket.makefile('rwb')
         self._lock = threading.Lock()
-        welcome = self.request({'type': 'join', 'role': role, 'name': name,
-                                'key': key})
+        cache_key = (str(host), int(port), str(name))
+        token = reconnect_token or self._reconnect_tokens.get(cache_key)
+        try:
+            welcome = self.request({'type': 'join', 'role': role, 'name': name,
+                                    'key': key, 'reconnect_token': token})
+        except Exception:
+            self.close()
+            raise
         self.actor = welcome.get('actor')
+        self.reconnect_token = welcome.get('reconnect_token')
+        if self.reconnect_token:
+            self._reconnect_tokens[cache_key] = self.reconnect_token
         self.state = welcome['state']
 
     def request(self, value):
@@ -439,6 +481,8 @@ class LanClient:
             data = self.file.readline(MAX_MESSAGE + 1)
         if not data:
             raise ConnectionError('Сервер закрыл соединение')
+        if len(data) > MAX_MESSAGE:
+            raise ConnectionError('Сервер прислал слишком большой ответ')
         response = json.loads(data.decode('utf-8'))
         if not response.get('ok'):
             raise ValueError(response.get('error', 'Ошибка сервера'))
@@ -531,8 +575,22 @@ def discover_games(timeout=0.5, targets=None):
                 if (room.get('protocol') != 'FAST_LAN_V1' or
                         room.get('phase') != 'lobby'):
                     continue
+                name = room.get('name')
+                port = room.get('port')
+                players = room.get('players')
+                capacity = room.get('capacity')
+                bots = room.get('bots')
+                instruments = room.get('instruments')
+                if (not isinstance(name, str) or not name.strip() or
+                        type(port) is not int or not 1 <= port <= 65535 or
+                        type(players) is not int or players < 0 or
+                        type(capacity) is not int or not 1 <= capacity <= 16 or
+                        players > capacity or type(bots) is not int or bots < 0 or
+                        type(instruments) is not int or instruments <= 0):
+                    continue
+                room['name'] = name.strip()[:40]
                 room['host'] = address[0]
-                room['address'] = f'{address[0]}:{int(room["port"])}'
+                room['address'] = f'{address[0]}:{port}'
                 found[room['address']] = room
             except (UnicodeDecodeError, json.JSONDecodeError, KeyError,
                     TypeError, ValueError):

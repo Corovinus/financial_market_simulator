@@ -50,7 +50,8 @@ def capm_statistics(returns: Sequence[Sequence[float]],
     if probabilities is None:
         probabilities = tuple(1.0 / len(observations) for _ in observations)
     probabilities = tuple(float(value) for value in probabilities)
-    if len(probabilities) != len(observations) or any(value < 0 for value in probabilities):
+    if (len(probabilities) != len(observations) or
+            any(not math.isfinite(value) or value < 0 for value in probabilities)):
         raise ValueError("Неверные вероятности")
     total = sum(probabilities)
     if total <= 0:
@@ -108,7 +109,8 @@ def binomial_option(spot: float, strike: float, rate: float, volatility: float,
     down = 1.0 / up
     growth = math.exp(r * dt)
     probability = (growth - down) / (up - down)
-    probability = min(1.0, max(0.0, probability))
+    if not 0 <= probability <= 1:
+        raise ValueError("Ставка выходит за безарбитражный интервал")
     values = []
     for down_moves in range(periods + 1):
         terminal = spot * up ** (periods - down_moves) * down ** down_moves
@@ -156,7 +158,13 @@ def information_expected_value(matrix: Sequence[Sequence[float]],
         raise ValueError("Неверная таблица выплат")
     if probabilities is None:
         probabilities = tuple(1.0 / len(rows) for _ in rows)
-    if len(probabilities) != len(rows):
+    probabilities = tuple(float(value) for value in probabilities)
+    if (len(probabilities) != len(rows) or
+            any(not math.isfinite(value) or value < 0 for value in probabilities)):
         raise ValueError("Неверное число вероятностей")
-    return sum(float(probabilities[index]) * sum(row) / len(row)
+    total = sum(probabilities)
+    if total <= 0:
+        raise ValueError("Сумма вероятностей должна быть положительной")
+    probabilities = tuple(value / total for value in probabilities)
+    return sum(probabilities[index] * sum(row) / len(row)
                for index, row in enumerate(rows))

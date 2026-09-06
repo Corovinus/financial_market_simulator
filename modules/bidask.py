@@ -16,25 +16,7 @@ from .display import open_scaled_display, present_scaled
 from .theme import COLORS, card, font, label, mouse_position, rounded
 
 
-ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger('fast.bidask')
-
-
-def _font(pygame, path: Path):
-    data = path.read_bytes()
-    if len(data) != 4096:
-        raise ValueError('Неверный размер оригинального шрифта')
-    glyphs = []
-    for code in range(256):
-        glyph = pygame.Surface((9, 16), pygame.SRCALPHA)
-        for y, row in enumerate(data[code * 16:(code + 1) * 16]):
-            for x in range(8):
-                if row & (0x80 >> x):
-                    glyph.set_at((x, y), (255, 255, 255))
-            if 0xC0 <= code <= 0xDF and row & 1:
-                glyph.set_at((8, y), (255, 255, 255))
-        glyphs.append(glyph)
-    return glyphs
 
 
 def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
@@ -91,9 +73,14 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     def quote_text(quote):
         return '' if quote is None else f'{quote.price}.{quote.quantity:02d}'
 
+    def visible_instruments():
+        start = min(max(0, selected_instrument - 3),
+                    max(0, len(scenario.names) - 4))
+        return range(start, min(start + 4, len(scenario.names)))
+
     def quote_rects():
-        for index in range(len(scenario.names)):
-            y = 202 + index * 72
+        for row, index in enumerate(visible_instruments()):
+            y = 202 + row * 64
             yield index, 'bid', pg.Rect(204, y, 150, 42)
             yield index, 'ask', pg.Rect(372, y, 150, 42)
 
@@ -116,8 +103,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         write('Bid', 234, 172, COLORS['buy'], small_font)
         write('Ask', 402, 172, COLORS['sell'], small_font)
         write('Позиция', 520, 172, COLORS['muted'], small_font)
-        for index, name in enumerate(scenario.names):
-            y = 202 + index * 72
+        if len(scenario.names) > 4:
+            write(f'{selected_instrument + 1}/{len(scenario.names)}', 568, 136,
+                  COLORS['muted'], small_font)
+        for row, index in enumerate(visible_instruments()):
+            name = scenario.names[index]
+            y = 202 + row * 64
             write(name[:12], 58, y + 15, COLORS['text'], body_font)
             bid = market.book.best(index, 'bid')
             ask = market.book.best(index, 'ask')

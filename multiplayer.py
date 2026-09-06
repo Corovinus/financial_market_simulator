@@ -10,19 +10,14 @@ import time
 from main import configure_logging
 from market.config import read_par
 from market.generator import generate_scenario
-from market.network import DEFAULT_PORT, LanClient, LanServer, local_address
+from market.network import (
+    DEFAULT_PORT, LanClient, LanServer, local_address, parse_endpoint,
+)
 from modules.network_ui import run_network_client
 
 
 ROOT = Path(__file__).resolve().parent
 LOGGER = logging.getLogger('fast.multiplayer')
-
-
-def endpoint(value, default_port=DEFAULT_PORT):
-    host, separator, port = value.rpartition(':')
-    if separator and port.isdigit():
-        return host, int(port)
-    return value, default_port
 
 
 def host_game(args, generated=False):
@@ -57,7 +52,7 @@ def host_game(args, generated=False):
 
 
 def join_game(args):
-    host, port = endpoint(args.address, args.port)
+    host, port = parse_endpoint(args.address, args.port)
     client = LanClient(host, port, args.name, 'player')
     try:
         run_network_client(client, 'player', args.scale,

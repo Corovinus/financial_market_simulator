@@ -11,7 +11,9 @@ if (-not (Test-Path -LiteralPath $python)) {
     --onefile `
     --windowed `
     --name FAST `
-    --add-data "$PSScriptRoot\data;data" `
+    --add-data "$PSScriptRoot\data\converted\manual_sections.json;data\converted" `
+    --add-data "$PSScriptRoot\data\original\B01.PAR;data\original" `
+    --add-data "$PSScriptRoot\data\original\B02.PAR;data\original" `
     "$PSScriptRoot\main.py"
 
 if ($LASTEXITCODE -ne 0) {

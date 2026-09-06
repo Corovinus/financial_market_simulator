@@ -45,11 +45,6 @@ def label(pygame, surface, typeface, value, position, color=None):
     surface.blit(typeface.render(str(value), True, color or COLORS["text"]), position)
 
 
-def centered(pygame, surface, typeface, value, rect, color=None):
-    image = typeface.render(str(value), True, color or COLORS["text"])
-    surface.blit(image, image.get_rect(center=rect.center))
-
-
 def mouse_position(pygame, event, window, canvas):
     """Convert a resizable-window mouse position to logical canvas pixels."""
     if not hasattr(event, "pos"):

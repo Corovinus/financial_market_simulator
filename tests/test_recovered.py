@@ -3,26 +3,51 @@ from pathlib import Path
 import tempfile
 import unittest
 
-from market.config import read_par, parse_offer
+from market.config import Scenario, read_par, parse_offer
 from market.calculations import bond_value, settle, future_capital
 from market.rng import OriginalRNG
 from market.engine import Market
 from market.orderbook import OrderError
 from market.robots import RobotController
 from modules.educational import (
-    binomial_option, capm_statistics, macaulay_duration, risk_premium_bound,
+    binomial_option, capm_statistics, information_expected_value,
+    macaulay_duration, risk_premium_bound,
 )
 from modules.document import (
-    Fraction, document_lines, is_formula, line_text,
-    pretty_formula, table_of_contents,
+    DocumentLine, Fraction, document_lines, is_formula, line_text,
+    page_scroll, pretty_formula, table_of_contents,
 )
-from market.levels import CUSTOM_LEVELS, CustomLevel, add_level
+from market.levels import CUSTOM_LEVELS, CustomLevel, add_level, load_levels
 from main import build_groups, wrapped_index
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class OriginalCases(unittest.TestCase):
+    def test_scenario_and_external_level_validation(self):
+        scenario = read_par(ROOT / 'data/original/B01.PAR')
+        with self.assertRaises(ValueError):
+            Scenario(**{**scenario.__dict__, 'names': (object(),)})
+        with self.assertRaises(ValueError):
+            Scenario(**{**scenario.__dict__,
+                        'score_parameters': (100, 0, 100, 6)})
+        with tempfile.TemporaryDirectory() as folder:
+            path = Path(folder) / 'levels.json'
+            payload = {'name': 'Внешний уровень',
+                       'scenario': {**scenario.__dict__}}
+            path.write_text(json.dumps([payload], ensure_ascii=False),
+                            encoding='utf-8')
+            loaded = load_levels(path)
+            self.assertEqual(loaded[0].name, 'Внешний уровень')
+            self.assertEqual(loaded[0].scenario, scenario)
+
+    def test_visual_page_scroll_does_not_skip_variable_rows(self):
+        lines = [DocumentLine('text', str(index)) for index in range(4)]
+        lines.insert(2, DocumentLine('formula', 'x', (Fraction('1', '2'),)))
+        next_page = page_scroll(lines, 0, 1, 60)
+        self.assertEqual(next_page, 2)
+        self.assertEqual(page_scroll(lines, next_page, -1, 60), 0)
+
     def test_manual_contents_and_formula_formatting(self):
         sections = json.loads(
             (ROOT / 'data/converted/manual_sections.json').read_text(
@@ -189,6 +214,13 @@ class OriginalCases(unittest.TestCase):
         self.assertEqual(len(stats['beta']), 2)
         self.assertEqual(risk_premium_bound(1000, True, 4), 1254)
         self.assertEqual(risk_premium_bound(1000, False, 4), 381)
+        self.assertEqual(information_expected_value(((1, 3), (5, 7)),
+                                                    (2, 2)), 4)
+        with self.assertRaises(ValueError):
+            binomial_option(20, 25, 1000, 1, 1)
+        with self.assertRaises(ValueError):
+            capm_statistics(((.1,), (.2,)), probabilities=(float('nan'),
+                                                               float('nan')))
 
     def test_custom_level_is_exposed_in_menu_registry(self):
         before = len(CUSTOM_LEVELS)

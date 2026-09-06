@@ -1,4 +1,6 @@
 """Pygame screens for a LAN player, player-host, or administrator."""
+import queue
+import threading
 import time
 
 from market.config import parse_offer
@@ -25,9 +27,13 @@ def run_network_client(client, role='player', scale=1.0,
     show_hints = False
     status = ''
     status_until = 0.0
-    last_poll = 0.0
     running = True
     is_admin = role in ('admin', 'host')
+    state = client.state
+    commands = queue.Queue(maxsize=64)
+    updates = queue.SimpleQueue()
+    network_stop = threading.Event()
+    network_failed = False
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -38,12 +44,38 @@ def run_network_client(client, role='player', scale=1.0,
         status, status_until = str(value), time.monotonic() + seconds
 
     def send(payload):
-        try:
-            client.request(payload)
-            return True
-        except (OSError, ValueError, ConnectionError) as error:
-            message(error, 5)
+        if network_failed:
             return False
+        try:
+            commands.put_nowait(payload)
+            return True
+        except queue.Full:
+            message('Слишком много команд', 3)
+            return False
+
+    def exchange():
+        """Own the blocking socket so a lost server never freezes Pygame."""
+        next_poll = 0.0
+        while not network_stop.is_set():
+            timeout = max(0.0, next_poll - time.monotonic())
+            try:
+                payload = commands.get(timeout=timeout)
+            except queue.Empty:
+                payload = {'type': 'state'}
+            try:
+                response = client.request(payload)
+                if 'state' in response:
+                    updates.put(('state', response['state']))
+            except ValueError as error:
+                updates.put(('error', str(error)))
+            except (OSError, ConnectionError) as error:
+                updates.put(('fatal', str(error)))
+                return
+            next_poll = time.monotonic() + 0.15
+
+    network_thread = threading.Thread(target=exchange, name='fast-lan-client',
+                                      daemon=True)
+    network_thread.start()
 
     def owner_name(state, owner):
         return state['players'].get(str(owner), f'ID {owner + 1}')
@@ -71,12 +103,14 @@ def run_network_client(client, role='player', scale=1.0,
             connected = set(state['connected'])
             humans = [(int(actor), name) for actor, name in state['players'].items()
                       if not name.startswith('Робот ')]
-            for row, (actor, name) in enumerate(humans):
+            for index, (actor, name) in enumerate(humans[:16]):
+                column, row = divmod(index, 8)
+                x = 72 + column * 416
+                y = 198 + row * 32
                 color = COLORS['accent_alt'] if actor in connected else COLORS['muted']
-                write(f'ID {actor + 1}', 72, 198 + row * 42, color, body)
-                write(name, 160, 198 + row * 42, COLORS['text'], body)
-                write('подключён' if actor in connected else 'отключён',
-                      650, 198 + row * 42, color, small)
+                write(f'ID {actor + 1}  {name}'[:24], x, y,
+                      COLORS['text'], small)
+                write('•' if actor in connected else '○', x + 360, y, color, body)
             if is_admin:
                 write('Enter — начать игру', 64, 460, COLORS['accent'], body)
             else:
@@ -94,8 +128,14 @@ def run_network_client(client, role='player', scale=1.0,
             write('Инструмент', 48, 158, COLORS['muted'], small)
             write('Bid', 246, 158, COLORS['buy'], small)
             write('Ask', 400, 158, COLORS['sell'], small)
-            for index, row in enumerate(state['book']):
-                y = 188 + index * 64
+            book_start = min(max(0, selected - 3),
+                             max(0, len(state['book']) - 4))
+            if len(state['book']) > 4:
+                write(f'{selected + 1}/{len(state["book"])}', 540, 158,
+                      COLORS['muted'], small)
+            for offset, row in enumerate(state['book'][book_start:book_start + 4]):
+                index = book_start + offset
+                y = 188 + offset * 64
                 if index == selected:
                     rounded(pg, screen, pg.Rect(42, y - 7, 554, 50),
                             COLORS['background_alt'], 9)
@@ -182,12 +222,18 @@ def run_network_client(client, role='player', scale=1.0,
             write('Esc — выход', 42, 548, COLORS['muted'], small)
 
     while running:
-        now = time.monotonic()
-        if now - last_poll >= 0.15:
-            if not send({'type': 'state'}):
-                running = False
-            last_poll = now
-        state = client.state
+        while True:
+            try:
+                update, value = updates.get_nowait()
+            except queue.Empty:
+                break
+            if update == 'state':
+                state = value
+            elif update == 'error':
+                message(value, 5)
+            else:
+                network_failed = True
+                message('Связь с сервером потеряна: ' + value, 30)
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 running = False
@@ -214,7 +260,7 @@ def run_network_client(client, role='player', scale=1.0,
                                 raise ValueError('Количество должно быть от 1 до 99')
                             payload['quantity'] = quantity
                         if send(payload):
-                            message('Команда принята')
+                            message('Команда отправлена')
                         input_mode, input_text = None, ''
                     except ValueError as error:
                         message(error)
@@ -252,6 +298,8 @@ def run_network_client(client, role='player', scale=1.0,
                     input_mode, input_text = 'quote', event.unicode
         draw(state)
         present_scaled(pg, screen, window)
-        clock.tick(60)
+        clock.tick(30)
+    network_stop.set()
+    network_thread.join(timeout=0.25)
     if close_display:
         pg.quit()

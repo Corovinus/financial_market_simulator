@@ -3,6 +3,7 @@ from dataclasses import replace
 import getpass
 import logging
 from pathlib import Path
+import queue
 import threading
 import time
 
@@ -10,6 +11,7 @@ from market.config import read_par
 from market.generator import generate_scenario
 from market.network import (
     DEFAULT_PORT, LanClient, LanServer, discover_games, local_address,
+    parse_endpoint,
 )
 from .display import open_scaled_display, present_scaled
 from .network_ui import run_network_client
@@ -18,12 +20,6 @@ from .theme import COLORS, card, font, label, mouse_position, rounded
 
 ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger('fast.network.launcher')
-
-
-def _endpoint(value):
-    host, separator, port = value.rpartition(':')
-    return ((host, int(port)) if separator and port.isdigit()
-            else (value, DEFAULT_PORT))
 
 
 def teacher_scenario(settings):
@@ -58,6 +54,7 @@ def run_network_launcher(scale=1.0):
     rooms = []
     room_index = 0
     searching = False
+    search_results = queue.SimpleQueue()
     last_search = 0.0
     status = ''
     settings = {
@@ -91,16 +88,11 @@ def run_network_launcher(scale=1.0):
         last_search = time.monotonic()
 
         def search():
-            nonlocal rooms, room_index, searching, status
             try:
-                rooms = discover_games()
-                room_index = min(room_index, max(0, len(rooms) - 1))
-                status = '' if rooms else 'Открытые игры пока не найдены'
-            except OSError:
+                search_results.put((discover_games(), None))
+            except Exception:
                 LOGGER.warning('Room discovery failed', exc_info=True)
-                status = 'Поиск недоступен. Адрес сервера можно ввести вручную.'
-            finally:
-                searching = False
+                search_results.put((None, 'Поиск недоступен. Адрес сервера можно ввести вручную.'))
 
         threading.Thread(target=search, name='fast-room-browser',
                          daemon=True).start()
@@ -133,7 +125,7 @@ def run_network_launcher(scale=1.0):
             server.stop()
 
     def join():
-        host, port = _endpoint(address)
+        host, port = parse_endpoint(address)
         client = LanClient(host, port, player_name, 'player')
         try:
             run_network_client(client, 'player', scale, close_display=False,
@@ -172,6 +164,19 @@ def run_network_launcher(scale=1.0):
                                               settings[key] + delta * step))
 
     while running:
+        try:
+            found_rooms, search_error = search_results.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            searching = False
+            if mode == 'connect':
+                if search_error:
+                    status = search_error
+                else:
+                    rooms = found_rooms
+                    room_index = min(room_index, max(0, len(rooms) - 1))
+                    status = '' if rooms else 'Открытые игры пока не найдены'
         if mode == 'connect' and time.monotonic() - last_search > 2:
             refresh_rooms()
         for event in pg.event.get():
@@ -382,4 +387,4 @@ def run_network_launcher(scale=1.0):
                             else COLORS['danger'])
             write(status[:100], 72, 558, status_color, small)
         present_scaled(pg, screen, window)
-        clock.tick(60)
+        clock.tick(30)

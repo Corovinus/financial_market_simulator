@@ -2,15 +2,11 @@
 from __future__ import annotations
 
 import time
-from pathlib import Path
 
 from market.orderbook import OrderBook, OrderError
-from .bidask import _font
 from .display import open_scaled_display, present_scaled
 from .theme import COLORS, card, font, label, mouse_position, rounded
 
-ROOT = Path(__file__).resolve().parents[1]
-SLD_SOURCE = ROOT / "data" / "converted" / "FTS_TUT.SLD.strings.txt"
 CPBND, ZCP = 0, 1
 
 

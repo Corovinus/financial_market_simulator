@@ -3,11 +3,13 @@ import argparse
 import json
 import logging
 from logging.handlers import RotatingFileHandler
+import os
 from pathlib import Path
 import sys
 
-from market.levels import CUSTOM_LEVELS
-from modules.document import document_lines, draw_document_line, table_of_contents
+from market.levels import CUSTOM_LEVELS, load_levels
+from modules.document import (document_lines, draw_document_line, load_sections,
+                              page_scroll, table_of_contents)
 from modules.display import open_scaled_display, present_scaled
 from modules.theme import COLORS, card, font, label, mouse_position, rounded
 
@@ -19,10 +21,18 @@ LOGGER = logging.getLogger('fast')
 
 def configure_logging():
     """Write navigation and crash diagnostics without growing the file forever."""
+    global LOG_PATH
     if LOGGER.handlers:
         return
-    handler = RotatingFileHandler(LOG_PATH, maxBytes=512_000, backupCount=2,
-                                  encoding='utf-8')
+    try:
+        handler = RotatingFileHandler(LOG_PATH, maxBytes=512_000, backupCount=2,
+                                      encoding='utf-8')
+    except OSError:
+        log_folder = Path(os.environ.get('LOCALAPPDATA', Path.home())) / 'FAST'
+        log_folder.mkdir(parents=True, exist_ok=True)
+        LOG_PATH = log_folder / 'fast.log'
+        handler = RotatingFileHandler(LOG_PATH, maxBytes=512_000, backupCount=2,
+                                      encoding='utf-8')
     handler.setFormatter(logging.Formatter(
         '%(asctime)s %(levelname)s %(name)s: %(message)s'))
     LOGGER.addHandler(handler)
@@ -35,7 +45,8 @@ def wrapped_index(current, delta, count):
     return (current + delta) % count if count else 0
 
 
-def build_groups():
+def build_groups(custom_levels=None):
+    custom_levels = CUSTOM_LEVELS if custom_levels is None else custom_levels
     return [
         ('Информация', [('Оглавление', 'Оглавление'),
                         ('Программа FAST', 'Программа F A S T')]),
@@ -45,7 +56,7 @@ def build_groups():
         ('Акции', [(f'Case CA{i}', f'Описание CA{i}') for i in range(1, 4)] + [('Портфель акций', 'Описание TutCAPM')]),
         ('Опционы', [(f'Case OP{i}', f'Описание OP{i}') for i in range(1, 4)] + [('Опционы', 'Описание TutOP')]),
         ('Эффективность', [(f'Case RE{i}', f'Описание RE{i}') for i in range(1, 4)]),
-        ('Свои уровни', [(level.name, '') for level in CUSTOM_LEVELS]),
+        ('Свои уровни', [(level.name, '') for level in custom_levels]),
         ('Сетевая игра', [('Локальная сеть', '')]),
         ('Конец', []),
     ]
@@ -57,7 +68,12 @@ GROUPS = build_groups()
 def main():
     global GROUPS
     configure_logging()
-    GROUPS = build_groups()
+    try:
+        active_levels = [*CUSTOM_LEVELS, *load_levels(APP_ROOT / 'levels.json')]
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        LOGGER.exception('Failed to load levels.json')
+        active_levels = list(CUSTOM_LEVELS)
+    GROUPS = build_groups(active_levels)
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--screenshot', type=Path, help='Save the initial menu and exit (SDL dummy supported).')
     parser.add_argument('--speed', type=float, default=1.0,
@@ -75,10 +91,11 @@ def main():
     document_heading = None
     table_font = None
 
-    def reset_display():
+    def reset_display(initial_scale=None):
         nonlocal screen, window, typeface, small, heading, formula, document_heading, table_font
         pg.init()
-        screen, window = open_scaled_display(pg, (960, 600), args.scale,
+        screen, window = open_scaled_display(pg, (960, 600),
+                                              args.scale if initial_scale is None else initial_scale,
                                               'FAST — исследовательская версия')
         typeface = font(pg, 18)
         small = font(pg, 14)
@@ -88,9 +105,9 @@ def main():
         table_font = pg.font.SysFont('consolas', 12)
 
     reset_display()
-    sections = json.loads((ROOT / 'data/converted/manual_sections.json').read_text(encoding='utf-8'))
+    sections = load_sections(ROOT / 'data/converted/manual_sections.json')
     toc_entries = table_of_contents(sections['Оглавление'], sections)
-    group = row = choice = scroll = horizontal = 0
+    group = row = choice = scroll = item_scroll = 0
     toc_index = toc_scroll = 0
     mode = 'main'
     lines = []
@@ -103,7 +120,7 @@ def main():
     back_button = pg.Rect(810, 31, 102, 34)
     exit_yes_button = pg.Rect(308, 264, 260, 48)
     exit_no_button = pg.Rect(588, 264, 260, 48)
-    reader_page_size = 16
+    item_page_size = 6
 
     LOGGER.info('Application started: scale=%s speed=%s groups=%s',
                 args.scale, args.speed, len(GROUPS))
@@ -113,7 +130,14 @@ def main():
 
     def item_rects():
         return [pg.Rect(306, 194 + index * 42, 600, 34)
-                for index in range(len(GROUPS[group][1]))]
+                for index in range(item_page_size)]
+
+    def keep_item_visible():
+        nonlocal item_scroll
+        if row < item_scroll:
+            item_scroll = row
+        elif row >= item_scroll + item_page_size:
+            item_scroll = row - item_page_size + 1
 
     def action_rects():
         return [pg.Rect(306, 282 + index * 58, 600, 44) for index in range(2)]
@@ -135,7 +159,7 @@ def main():
         title = next((name for name in sections if prefix and name.startswith(prefix)), None)
         if title:
             return [title, ''] + document_lines(sections[title])
-        custom = next((level for level in CUSTOM_LEVELS if level.name == label_value), None)
+        custom = next((level for level in active_levels if level.name == label_value), None)
         if custom:
             scenario = custom.scenario
             return [label_value, '',
@@ -147,19 +171,19 @@ def main():
         return [label_value, '', 'Описание для этого раздела пока недоступно.']
 
     def enter_section():
-        nonlocal mode, row, choice
+        nonlocal mode, row, choice, item_scroll
         items = GROUPS[group][1]
         if group == len(GROUPS) - 1:
             mode = 'exit'
         elif items:
-            row, choice, mode = 0, 0, 'items'
+            row, choice, item_scroll, mode = 0, 0, 0, 'items'
         else:
             LOGGER.info('Empty section selected: group=%s', GROUPS[group][0])
 
     def set_group(index, source):
-        nonlocal group, row, choice, mode
+        nonlocal group, row, choice, item_scroll, mode
         group = index % len(GROUPS)
-        row = choice = 0
+        row = choice = item_scroll = 0
         mode = 'main'
         LOGGER.info('Section selected via %s: index=%s name=%s',
                     source, group, GROUPS[group][0])
@@ -176,7 +200,7 @@ def main():
 
     def open_selected():
         """Activate the currently selected menu item."""
-        nonlocal mode, choice, lines, scroll, horizontal, reader_back
+        nonlocal mode, choice, lines, scroll, reader_back
         if group == len(GROUPS) - 1:
             mode = 'exit'
             return
@@ -189,12 +213,14 @@ def main():
         if group == 1 and row == 1:
             from modules.introduction import run_introduction
             LOGGER.info('Module started: introduction')
+            module_scale = min(value / base for value, base in zip(
+                pg.display.get_surface().get_size(), (960, 600)))
             try:
-                run_introduction(args.speed, args.scale, close_display=False)
+                run_introduction(args.speed, module_scale, close_display=False)
             except Exception:
                 LOGGER.exception('Module failed: introduction')
                 raise
-            reset_display()
+            reset_display(module_scale)
             mode = 'main'
             pg.event.clear()
             LOGGER.info('Module closed: introduction; main display restored=%s',
@@ -208,41 +234,43 @@ def main():
             return
         lines = description_lines(label_value, prefix)
         reader_back = 'items'
-        mode, scroll, horizontal = 'reader', 0, 0
+        mode, scroll = 'reader', 0
 
     def activate_action():
-        nonlocal mode, lines, scroll, horizontal, reader_back
+        nonlocal mode, lines, scroll, reader_back
         label_value, prefix = GROUPS[group][1][row]
         if choice == 0:
             lines = description_lines(label_value, prefix)
             reader_back = 'action'
-            mode, scroll, horizontal = 'reader', 0, 0
+            mode, scroll = 'reader', 0
             LOGGER.info('Description opened: %s', label_value)
             return
         LOGGER.info('Module started: %s', label_value)
+        module_scale = min(value / base for value, base in zip(
+            pg.display.get_surface().get_size(), (960, 600)))
         try:
             if label_value == 'Локальная сеть':
                 from modules.network_launcher import run_network_launcher
-                run_network_launcher(args.scale)
+                run_network_launcher(module_scale)
             elif label_value in ('Case B01', 'Case B02'):
                 from modules.bidask import run_session
                 run_session(ROOT / f'data/original/{label_value[5:]}.PAR',
-                            args.speed, args.scale, close_display=False)
+                            args.speed, module_scale, close_display=False)
             else:
-                custom = next((level for level in CUSTOM_LEVELS
+                custom = next((level for level in active_levels
                                if level.name == label_value), None)
                 if custom is not None:
                     from modules.bidask import run_session
-                    run_session(custom.scenario, args.speed, args.scale,
+                    run_session(custom.scenario, args.speed, module_scale,
                                 close_display=False)
                 else:
                     from modules.workshops import run_module
-                    run_module(label_value, args.speed, args.scale,
+                    run_module(label_value, args.speed, module_scale,
                                close_display=False)
         except Exception:
             LOGGER.exception('Module failed: %s', label_value)
             raise
-        reset_display()
+        reset_display(module_scale)
         mode = 'main'
         pg.event.clear()
         LOGGER.info('Module closed: %s; main display restored=%s',
@@ -250,7 +278,7 @@ def main():
 
     def click_action(position):
         """Make the menu usable with a mouse without changing keyboard flow."""
-        nonlocal group, row, mode, choice, lines, scroll, horizontal
+        nonlocal group, row, item_scroll, mode, choice, lines, scroll
         nonlocal toc_index, toc_scroll, reader_back, running
         if position is None:
             return
@@ -278,7 +306,10 @@ def main():
             if open_button.collidepoint(position):
                 enter_section()
         elif mode == 'items':
-            for index, rect in enumerate(item_rects()):
+            for offset, rect in enumerate(item_rects()):
+                index = item_scroll + offset
+                if index >= len(GROUPS[group][1]):
+                    break
                 if rect.collidepoint(position):
                     row = index
                     LOGGER.info('Item selected via mouse: group=%s row=%s label=%s',
@@ -303,7 +334,7 @@ def main():
                     target = toc_entries[toc_index]
                     lines = [target, ''] + document_lines(sections[target])
                     reader_back = 'toc'
-                    mode, scroll, horizontal = 'reader', 0, 0
+                    mode, scroll = 'reader', 0
                     return
 
     while running:
@@ -315,6 +346,9 @@ def main():
                 continue
             if event.type == pg.MOUSEWHEEL and mode == 'reader':
                 scroll = max(0, min(reader_limit(), scroll - event.y * 3))
+            elif event.type == pg.MOUSEWHEEL and mode == 'items':
+                row = wrapped_index(row, -event.y, len(GROUPS[group][1]))
+                keep_item_visible()
             elif event.type == pg.MOUSEWHEEL and mode == 'toc':
                 toc_index = max(0, min(len(toc_entries) - 1,
                                        toc_index - event.y))
@@ -326,9 +360,12 @@ def main():
                 if key in (pg.K_ESCAPE, pg.K_LEFT):
                     mode = reader_back
                 elif key in (pg.K_DOWN, pg.K_PAGEDOWN):
-                    scroll = min(reader_limit(), scroll + (reader_page_size if key == pg.K_PAGEDOWN else 1))
+                    scroll = (page_scroll(lines[1:], scroll, 1, 326)
+                              if key == pg.K_PAGEDOWN else
+                              min(reader_limit(), scroll + 1))
                 elif key in (pg.K_UP, pg.K_PAGEUP):
-                    scroll = max(0, scroll - (reader_page_size if key == pg.K_PAGEUP else 1))
+                    scroll = (page_scroll(lines[1:], scroll, -1, 326)
+                              if key == pg.K_PAGEUP else max(0, scroll - 1))
                 elif key == pg.K_HOME:
                     scroll = 0
                 elif key == pg.K_END:
@@ -346,7 +383,7 @@ def main():
                     target = toc_entries[toc_index]
                     lines = [target, ''] + document_lines(sections[target])
                     reader_back = 'toc'
-                    mode, scroll, horizontal = 'reader', 0, 0
+                    mode, scroll = 'reader', 0
             elif mode == 'exit':
                 if key in (pg.K_RETURN, pg.K_y):
                     running = False
@@ -366,6 +403,7 @@ def main():
                 elif key in (pg.K_UP, pg.K_DOWN):
                     row = wrapped_index(row, 1 if key == pg.K_DOWN else -1,
                                         len(GROUPS[group][1]))
+                    keep_item_visible()
                     LOGGER.info('Item selected via keyboard: group=%s row=%s',
                                 GROUPS[group][0], row)
                 elif key in (pg.K_RETURN, pg.K_RIGHT):
@@ -442,12 +480,17 @@ def main():
             elif mode == 'items':
                 options = [item[0] for item in GROUPS[group][1]]
                 text('↑ ↓ — выбрать материал   ← — назад', 308, 166, COLORS['muted'], small)
-                for index, (value, rect) in enumerate(zip(options, item_rects())):
+                visible = options[item_scroll:item_scroll + item_page_size]
+                for offset, (value, rect) in enumerate(zip(visible, item_rects())):
+                    index = item_scroll + offset
                     selected = index == row
                     rounded(pg, screen, rect, COLORS['accent'] if selected else COLORS['background_alt'], 8)
                     if selected:
                         pg.draw.rect(screen, COLORS['accent_alt'], (rect.x, rect.y, 4, rect.height), border_radius=2)
                     text(value, rect.x + 16, rect.y + 7, COLORS['white'] if selected else COLORS['text'], typeface)
+                if len(options) > item_page_size:
+                    text(f'{row + 1} / {len(options)}', 828, 446,
+                         COLORS['muted'], small)
                 rounded(pg, screen, open_button, COLORS['accent'], 9)
                 text('Открыть  →', open_button.x + 22, open_button.y + 10,
                      COLORS['white'], typeface)

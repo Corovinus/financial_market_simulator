@@ -1,7 +1,6 @@
 """Interactive DOS-like lessons for every FAST item outside BIDASK B01/B02."""
 from __future__ import annotations
 
-import json
 import math
 from dataclasses import dataclass
 from pathlib import Path
@@ -17,7 +16,7 @@ from .educational import (
     risk_premium_bound,
 )
 from .display import open_scaled_display, present_scaled
-from .document import document_lines, draw_document_line
+from .document import document_lines, draw_document_line, load_sections, page_scroll
 from .theme import COLORS, card, font, label as draw_label, mouse_position, rounded
 
 
@@ -162,23 +161,6 @@ def _calculate(label: str, fields: list[Field]) -> list[str]:
     return []
 
 
-def _font(pg, path: Path):
-    data = path.read_bytes()
-    if len(data) != 4096:
-        raise ValueError("Неверный размер оригинального шрифта")
-    glyphs = []
-    for code in range(256):
-        glyph = pg.Surface((9, 16), pg.SRCALPHA)
-        for y, row in enumerate(data[code * 16:(code + 1) * 16]):
-            for x in range(8):
-                if row & (0x80 >> x):
-                    glyph.set_at((x, y), (255, 255, 255))
-            if 0xC0 <= code <= 0xDF and row & 1:
-                glyph.set_at((8, y), (255, 255, 255))
-        glyphs.append(glyph)
-    return glyphs
-
-
 def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
                close_display: bool = True):
     """Run one of the recovered teaching tabs and return its last result."""
@@ -197,7 +179,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
     manual = []
     manual_path = ROOT / "data/converted/manual_sections.json"
     if manual_path.exists():
-        sections = json.loads(manual_path.read_text(encoding="utf-8"))
+        sections = load_sections(manual_path)
         prefixes = {
             "Портфель акций": "Описание TutCAPM",
             "Опционы": "Описание TutOP",
@@ -332,9 +314,12 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
                         running = False
                 elif mode == "manual":
                     if key in (pg.K_DOWN, pg.K_PAGEDOWN):
-                        scroll = min(max(0, len(manual) - 1), scroll + (10 if key == pg.K_PAGEDOWN else 1))
+                        scroll = (page_scroll(manual, scroll, 1, 390)
+                                  if key == pg.K_PAGEDOWN else
+                                  min(max(0, len(manual) - 1), scroll + 1))
                     elif key in (pg.K_UP, pg.K_PAGEUP):
-                        scroll = max(0, scroll - (10 if key == pg.K_PAGEUP else 1))
+                        scroll = (page_scroll(manual, scroll, -1, 390)
+                                  if key == pg.K_PAGEUP else max(0, scroll - 1))
                     elif key == pg.K_HOME:
                         scroll = 0
                 elif key == pg.K_d:
@@ -366,6 +351,8 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
                             field = fields[selected]
                             if not field.minimum <= value <= field.maximum:
                                 raise ValueError("Значение вне диапазона")
+                            if field.integer and not value.is_integer():
+                                raise ValueError("Нужно целое число")
                             field.value = int(value) if field.integer else value
                             last = _calculate(label, fields)
                             message("Параметр обновлён")

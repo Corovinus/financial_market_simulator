@@ -1,5 +1,8 @@
 """Structured tables and mathematical typesetting for recovered FAST.DOC."""
 from dataclasses import dataclass
+from functools import lru_cache
+import json
+from pathlib import Path
 import re
 
 
@@ -17,6 +20,12 @@ class DocumentLine:
     kind: str
     text: str = ''
     parts: tuple = ()
+
+
+@lru_cache(maxsize=2)
+def load_sections(path):
+    """Read the immutable converted manual once per process."""
+    return json.loads(Path(path).read_text(encoding='utf-8'))
 
 
 def pretty_formula(value):
@@ -201,6 +210,26 @@ def line_height(value):
         return 42 if any(isinstance(part, Fraction) for part in value.parts) else 28
     return 20 if (isinstance(value, DocumentLine) and
                   value.kind in ('table', 'table_header')) else 19
+
+
+def page_scroll(values, start, direction, height):
+    """Move by one visual page without skipping variable-height rows."""
+    if not values or direction == 0:
+        return max(0, start)
+    start = max(0, min(start, len(values) - 1))
+    if direction > 0:
+        used = 0
+        index = start
+        while index < len(values) and (used == 0 or used + line_height(values[index]) <= height):
+            used += line_height(values[index])
+            index += 1
+        return min(len(values) - 1, index)
+    used = 0
+    index = start
+    while index > 0 and (used == 0 or used + line_height(values[index - 1]) <= height):
+        index -= 1
+        used += line_height(values[index])
+    return index
 
 
 def draw_document_line(pygame, surface, value, rect, text_font, math_font,

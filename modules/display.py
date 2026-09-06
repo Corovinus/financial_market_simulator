@@ -2,18 +2,6 @@
 from __future__ import annotations
 
 
-_REPLACEMENTS = str.maketrans({
-    "—": "-", "–": "-", "−": "-", "…": "...", "×": "x", "•": "*",
-    "↑": "^", "↓": "v", "←": "<", "→": ">", "↔": "<>",
-    "“": '"', "”": '"', "„": '"', "’": "'", "‘": "'",
-})
-
-
-def cp866_bytes(value) -> bytes:
-    """Encode text for the bundled CP866 bitmap, replacing non-DOS glyphs."""
-    return str(value).translate(_REPLACEMENTS).encode("cp866", errors="replace")
-
-
 def open_scaled_display(pygame, size, scale, caption):
     """Return a fixed-size pixel canvas and a resizable scaled window."""
     if not isinstance(scale, (int, float)) or not 0.5 <= float(scale) <= 5:

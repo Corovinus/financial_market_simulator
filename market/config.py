@@ -22,6 +22,55 @@ class Scenario:
     strategy: int
     hints: bool
 
+    def __post_init__(self):
+        """Reject malformed built-in, generated and user-authored levels early."""
+        tuple_fields = ('rates', 'names', 'payments', 'positions',
+                        'score_parameters')
+        for field in tuple_fields:
+            object.__setattr__(self, field, tuple(getattr(self, field)))
+        object.__setattr__(self, 'payments',
+                           tuple(tuple(row) for row in self.payments))
+        if type(self.periods) is not int or self.periods <= 0:
+            raise ValueError('Число периодов должно быть положительным')
+        if type(self.duration_ticks) is not int or self.duration_ticks <= 0:
+            raise ValueError('Длительность периода должна быть положительной')
+        if len(self.rates) != self.periods or any(
+                not isinstance(value, (int, float)) or
+                not math.isfinite(value) or value <= -100
+                for value in self.rates):
+            raise ValueError('Для каждого периода нужна конечная ставка выше -100%')
+        if (not self.names or any(not isinstance(name, str) or not name.strip()
+                                  for name in self.names)):
+            raise ValueError('Нужна хотя бы одна бумага с названием')
+        object.__setattr__(self, 'names', tuple(name.strip() for name in self.names))
+        if (len(self.payments) != len(self.names) or
+                any(len(row) != self.periods or
+                    any(type(value) is not int for value in row)
+                    for row in self.payments)):
+            raise ValueError('Таблица выплат должна совпадать с бумагами и периодами')
+        if (len(self.positions) != len(self.names) or
+                any(type(value) is not int for value in self.positions)):
+            raise ValueError('Начальные позиции должны быть целыми и совпадать с бумагами')
+        if (not isinstance(self.cash, (int, float)) or
+                not math.isfinite(self.cash)):
+            raise ValueError('Начальные деньги должны быть конечным числом')
+        if (len(self.score_parameters) != 4 or
+                any(not isinstance(value, (int, float)) or
+                    not math.isfinite(value) for value in self.score_parameters)):
+            raise ValueError('Для очков нужны четыре конечных числа')
+        low, _unused, upper, maximum = self.score_parameters
+        if upper <= low or maximum < 0:
+            raise ValueError('Верхняя граница очков должна быть выше нижней')
+        if (type(self.robots) is not int or self.robots < 0 or
+                type(self.wolves) is not int or not 0 <= self.wolves <= self.robots):
+            raise ValueError('Неверное число роботов или волков')
+        if type(self.reaction_ticks) is not int or self.reaction_ticks <= 0:
+            raise ValueError('Реакция роботов должна быть положительной')
+        if self.strategy not in (0, 1) or type(self.strategy) is not int:
+            raise ValueError('Стратегия роботов должна быть 0 или 1')
+        if type(self.queue) is not bool or type(self.hints) is not bool:
+            raise ValueError('Очередь и подсказки должны быть True или False')
+
 
 def read_par(path: str | Path) -> Scenario:
     lines = iter(line.strip() for line in Path(path).read_bytes().decode('cp866').splitlines() if line.strip())

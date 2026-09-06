@@ -5,6 +5,8 @@ the ``Свои уровни`` menu.  The same ``Scenario`` object is accepted by
 normal BIDASK screen, so no second configuration format is needed.
 """
 from dataclasses import dataclass
+import json
+from pathlib import Path
 
 from .config import Scenario
 
@@ -45,3 +47,22 @@ def add_level(name: str, scenario: Scenario) -> CustomLevel:
     level = CustomLevel(name.strip(), scenario)
     CUSTOM_LEVELS.append(level)
     return level
+
+
+def load_levels(path: str | Path) -> tuple[CustomLevel, ...]:
+    """Load optional user levels stored beside a packaged executable."""
+    source = Path(path)
+    if not source.exists():
+        return ()
+    data = json.loads(source.read_text(encoding='utf-8'))
+    if not isinstance(data, list):
+        raise ValueError('levels.json должен содержать список уровней')
+    levels = []
+    for item in data:
+        if not isinstance(item, dict) or not isinstance(item.get('scenario'), dict):
+            raise ValueError('Каждому уровню нужны name и scenario')
+        name = str(item.get('name', '')).strip()
+        if not name:
+            raise ValueError('У уровня нет названия')
+        levels.append(CustomLevel(name[:60], Scenario(**item['scenario'])))
+    return tuple(levels)
