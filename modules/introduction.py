@@ -1,6 +1,7 @@
 """Guided port of DEMO.EXE FTS_TUT.SLD used by the Торги/Знакомство tab."""
 from __future__ import annotations
 
+import re
 import time
 
 from market.orderbook import OrderBook, OrderError
@@ -183,16 +184,19 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
     pg.init()
     screen, window = open_scaled_display(pg, (960, 600), scale, "FAST — DEMO.EXE FTS_TUT")
     body_font = font(pg, 18)
+    bold_font = font(pg, 18, bold=True)
     small_font = font(pg, 15)
     title_font = font(pg, 28, bold=True)
     C = {"blue": COLORS["background"], "white": COLORS["text"], "black": COLORS["black"],
          "yellow": COLORS["warning"], "green": COLORS["buy"], "cyan": COLORS["accent"],
          "red": COLORS["danger"], "grey": COLORS["panel"], "brown": COLORS["panel_alt"]}
     page, text, mode, side_choice = 0, "", "", "bid"
+    instrument_choice = CPBND
     moved, help_visible, running = False, False, True
     cash, holdings = 4238, [5, 12]
     book = _initial_book()
     status, status_until = "", 0.0
+    page_started = time.monotonic()
     mouse = None
     clock = pg.time.Clock()
 
@@ -210,6 +214,7 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
                 line = word if not line else line + " " + word
         if line:
             write(line, x, y + row * 18, color)
+        return row + 1
 
     def set_status(value):
         nonlocal status, status_until
@@ -217,7 +222,16 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
 
     def reset(new_page):
         nonlocal book, text, mode, moved, side_choice, help_visible, cash
-        text, mode, moved, side_choice, help_visible = "", "", False, "bid", False
+        nonlocal instrument_choice, page_started
+        page_started = time.monotonic()
+        text, mode, moved, help_visible = "", "", False, False
+        instrument_choice, side_choice = {
+            11: (ZCP, "bid"),
+            15: (CPBND, "ask"),
+            16: (ZCP, "ask"),
+            18: (ZCP, "ask"),
+            19: (ZCP, "ask"),
+        }.get(new_page, (CPBND, "bid"))
         if new_page == 0:
             book = _initial_book()
             cash = 4238
@@ -246,6 +260,55 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
     def quote_text(value):
         return "нет" if value is None else "{}.{}".format(value.price, value.quantity)
 
+    def rich_line(value, x, y):
+        """Draw keyboard names in lesson 5 with a bold face."""
+        cursor = x
+        keys = {"Стрелки", "Tab", "Shift-Tab", "Enter", "F10", "Esc"}
+        for part in re.split(r"(Стрелки|Shift-Tab|Tab|Enter|F10|Esc)", value):
+            if not part:
+                continue
+            face = bold_font if part in keys else body_font
+            rendered = face.render(part, True, C["white"])
+            screen.blit(rendered, (cursor, y))
+            cursor += rendered.get_width()
+
+    def pulse_rect(rect, color="red"):
+        """Blink the part of the trading screen explained by this lesson."""
+        if int((time.monotonic() - page_started) * 2.5) % 2 == 0:
+            rounded(pg, screen, rect, C[color], 9, 4)
+
+    def lesson_highlight():
+        bid = pg.Rect(230, 197 + instrument_choice * 70, 160, 42)
+        ask = pg.Rect(420, 197 + instrument_choice * 70, 160, 42)
+        if page == 6:
+            return pg.Rect(48, 150, 550, 154)
+        if page == 7 and not moved:
+            return pg.Rect(48, 150, 550, 154)
+        if page in (17, 19, 22, 24):
+            return pg.Rect(48, 310, 700, 54)
+        if page == 27:
+            return pg.Rect(430, 314, 245, 46)
+        if page == 28:
+            return pg.Rect(48, 116, 850, 50)
+        if page in (29, 30, 31):
+            return pg.Rect(48, 150, 700, 214)
+        return bid if side_choice == "bid" else ask
+
+    def animated_input():
+        """Repeat a full price-and-quantity entry demonstration."""
+        sample = "50.10"
+        phase = ((time.monotonic() - page_started) * 1.4) % (len(sample) + 3.5)
+        entered = sample[:min(len(sample), int(phase))]
+        accepted = phase >= len(sample) + 1
+        card(pg, screen, pg.Rect(64, 355, 720, 92), COLORS['background_alt'],
+             COLORS['accent'] if not accepted else COLORS['buy'])
+        write("Заявка Bid:", 92, 375, "muted", small_font)
+        write(entered + ("_" if not accepted else ""), 220, 368,
+              "white", bold_font)
+        write("Enter — заявка принята" if accepted else
+              "Сначала цена, затем точка и количество",
+              92, 413, "green" if accepted else "cyan", small_font)
+
     def market():
         card(pg, screen, pg.Rect(36, 105, 888, 270), COLORS['panel'], COLORS['border'])
         write("Time remaining    298", 60, 128, "muted", small_font); write("ID:  1", 810, 128, "white", small_font)
@@ -256,9 +319,14 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
             bid, ask = book.best(instrument, "bid"), book.best(instrument, "ask")
             bid_field = pg.Rect(230, y - 7, 160, 42)
             ask_field = pg.Rect(420, y - 7, 160, 42)
-            quote_page = SCENES[page][2] in ("quote", "invalid_quote")
-            bid_active = page == 7 or quote_page and side_choice == "bid"
-            ask_active = page == 7 or quote_page and side_choice == "ask"
+            interactive = SCENES[page][2] in ("select", "quote", "invalid_quote",
+                                                "buy8", "buy42", "sell5", "sell90",
+                                                "invalid_qty", "cancel")
+            selected_row = moved or SCENES[page][2] != "select"
+            bid_active = (interactive and selected_row and
+                          instrument == instrument_choice and side_choice == "bid")
+            ask_active = (interactive and selected_row and
+                          instrument == instrument_choice and side_choice == "ask")
             rounded(pg, screen, bid_field, COLORS['background_alt'], 8)
             rounded(pg, screen, bid_field, COLORS['accent'] if bid_active else COLORS['border'], 8, 2 if bid_active else 1)
             rounded(pg, screen, ask_field, COLORS['background_alt'], 8)
@@ -270,6 +338,7 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
         write("Int", 250, 340, "muted", small_font); write("25.00", 295, 336, "white")
         write("Period 1", 440, 340, "muted", small_font); write("Trial 1", 565, 336, "white")
         write("Last  0", 720, 340, "muted", small_font)
+        pulse_rect(lesson_highlight())
 
     def draw():
         screen.fill(C["blue"])
@@ -278,26 +347,33 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
         write("ФИНАНСОВАЯ ТОРГОВАЯ СИСТЕМА", 48, 30, "cyan", title_font)
         write(f"Урок {page + 1} / {len(SCENES)}", 650, 36, "muted", small_font)
         title, lines, kind = SCENES[page]
-        market_kinds = ("market", "select", "quote", "invalid_quote", "buy8",
-                        "buy42", "sell5", "sell90", "invalid_qty", "cancel")
-        if kind in market_kinds:
-            market(); card(pg, screen, pg.Rect(36, 398, 888, 110), COLORS['panel'], COLORS['border'])
-            write(title, 60, 416, "yellow", body_font)
-            for row, line in enumerate(lines):
-                wrapped(line, 60, 450 + row * 18, "white")
+        market_lesson = page >= 6 and kind != "finish"
+        input_lesson = kind in ("quote", "invalid_quote", "buy8", "buy42",
+                                "sell5", "sell90", "invalid_qty")
+        if market_lesson:
+            market()
+            panel = pg.Rect(36, 388, 888, 124 if input_lesson else 172)
+            card(pg, screen, panel, COLORS['panel'], COLORS['border'])
+            write(title, 60, 404, "yellow", body_font)
+            line_y = 434
+            for line in lines:
+                line_y += wrapped(line, 60, line_y, "white") * 18
             if kind in ("quote", "invalid_quote"):
                 rounded(pg, screen, pg.Rect(36, 518, 888, 42), COLORS['panel_alt'], 8)
                 write(("Bid" if side_choice == "bid" else "Ask") + " заявка: " + (text or "цена.количество"), 60, 528, "white")
             elif kind in ("buy8", "buy42", "sell5", "sell90", "invalid_qty"):
                 rounded(pg, screen, pg.Rect(36, 518, 888, 42), COLORS['panel_alt'], 8)
                 write(("B купить" if mode == "buy" else "S продать") + "  Количество: " + (text or "0"), 60, 528, "white")
-            else:
-                write("Стрелки — выбор позиции; Enter — продолжить; F10/Esc — выход", 60, 528, "cyan", small_font)
         else:
             card(pg, screen, pg.Rect(36, 105, 888, 405), COLORS['panel'], COLORS['border'])
             write(title, 64, 140, "yellow" if page else "white", title_font)
             for row, line in enumerate(lines):
-                wrapped(line, 64, 202 + row * 28, "white")
+                if page == 4:
+                    rich_line(line, 64, 202 + row * 28)
+                else:
+                    wrapped(line, 64, 202 + row * 28, "white")
+            if page == 3:
+                animated_input()
             if kind == "f1":
                 write("Нажмите F1", 64, 410, "danger")
             elif kind == "finish":
@@ -368,7 +444,12 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0,
                     advance()
                 continue
             if kind == "select":
-                if key in (pg.K_LEFT, pg.K_RIGHT, pg.K_UP, pg.K_DOWN):
+                if key in (pg.K_LEFT, pg.K_RIGHT):
+                    side_choice = "bid" if key == pg.K_LEFT else "ask"
+                    moved = True
+                elif key in (pg.K_UP, pg.K_DOWN):
+                    instrument_choice = ((instrument_choice - 1) % 2 if key == pg.K_UP
+                                         else (instrument_choice + 1) % 2)
                     moved = True
                 elif key == pg.K_RETURN and moved:
                     advance()
