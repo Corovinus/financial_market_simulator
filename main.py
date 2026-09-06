@@ -136,6 +136,7 @@ def main():
     back_button = pg.Rect(810, 31, 102, 34)
     item_page_size = 6
     settings_index = 0
+    settings_editing = False
     hotkeys_back = 'settings'
     mouse = None
     setting_rows = (
@@ -164,6 +165,14 @@ def main():
 
     def action_rects():
         return [pg.Rect(306, 282 + index * 58, 600, 44) for index in range(2)]
+
+    def setting_rect(index):
+        return pg.Rect(306, 196 + index * 46, 600, 40)
+
+    def setting_arrow_rects(index):
+        row_rect = setting_rect(index)
+        return (pg.Rect(700, row_rect.y + 5, 38, 30),
+                pg.Rect(852, row_rect.y + 5, 38, 30))
 
     def reader_limit():
         return max(0, len(lines) - 2)
@@ -195,11 +204,12 @@ def main():
         return [label_value, '', 'Описание для этого раздела пока недоступно.']
 
     def enter_section():
-        nonlocal mode, row, choice, item_scroll, running
+        nonlocal mode, row, choice, item_scroll, running, settings_editing
         items = GROUPS[group][1]
         if GROUPS[group][0] == 'Конец':
             running = False
         elif GROUPS[group][0] == 'Настройки':
+            settings_editing = False
             mode = 'settings'
         elif items:
             row, choice, item_scroll, mode = 0, 0, 0, 'items'
@@ -207,20 +217,23 @@ def main():
             LOGGER.info('Empty section selected: group=%s', GROUPS[group][0])
 
     def set_group(index, source):
-        nonlocal group, row, choice, item_scroll, mode
+        nonlocal group, row, choice, item_scroll, mode, settings_editing
         group = index % len(GROUPS)
         row = choice = item_scroll = 0
         mode = 'main'
+        settings_editing = False
         LOGGER.info('Section selected via %s: index=%s name=%s',
                     source, group, GROUPS[group][0])
 
     def go_back():
         """Return one visible navigation level, just like Esc/Left."""
-        nonlocal mode
+        nonlocal mode, settings_editing
         if mode == 'reader':
             mode = reader_back
         elif mode in ('action', 'toc'):
             mode = 'items'
+        elif mode == 'settings' and settings_editing:
+            settings_editing = False
         elif mode in ('items', 'settings'):
             mode = 'main'
         elif mode == 'hotkeys':
@@ -329,7 +342,7 @@ def main():
         """Make the menu usable with a mouse without changing keyboard flow."""
         nonlocal group, row, item_scroll, mode, choice, lines, scroll
         nonlocal toc_index, toc_scroll, reader_back, running, settings_index
-        nonlocal hotkeys_back
+        nonlocal hotkeys_back, settings_editing
         if position is None:
             return
         if mode != 'main' and back_button.collidepoint(position):
@@ -379,13 +392,19 @@ def main():
                     mode, scroll = 'reader', 0
                     return
         elif mode == 'settings':
-            for index, _setting in enumerate(setting_rows):
-                if pg.Rect(306, 196 + index * 46, 600, 40).collidepoint(position):
+            for index, (_caption, key) in enumerate(setting_rows):
+                if setting_rect(index).collidepoint(position):
                     settings_index = index
-                    target = change_preference(1)
-                    if target:
+                    if key == 'hotkeys':
                         hotkeys_back = 'settings'
-                        mode = target
+                        mode = 'hotkeys'
+                    else:
+                        left, right = setting_arrow_rects(index)
+                        if left.collidepoint(position):
+                            change_preference(-1)
+                        elif right.collidepoint(position):
+                            change_preference(1)
+                        settings_editing = True
                     return
 
     while running:
@@ -450,18 +469,28 @@ def main():
                 if key in (pg.K_ESCAPE, pg.K_LEFT):
                     mode = hotkeys_back
             elif mode == 'settings':
-                if key in (pg.K_ESCAPE, pg.K_LEFT):
-                    mode = 'main'
-                elif key in (pg.K_UP, pg.K_DOWN):
+                setting_key = setting_rows[settings_index][1]
+                if key == pg.K_ESCAPE:
+                    if settings_editing:
+                        settings_editing = False
+                    else:
+                        mode = 'main'
+                elif settings_editing and key in (pg.K_LEFT, pg.K_RIGHT):
+                    change_preference(-1 if key == pg.K_LEFT else 1)
+                elif settings_editing and key == pg.K_RETURN:
+                    settings_editing = False
+                elif not settings_editing and key in (pg.K_UP, pg.K_DOWN):
                     settings_index = wrapped_index(
                         settings_index, 1 if key == pg.K_DOWN else -1,
                         len(setting_rows))
-                elif key in (pg.K_LEFT, pg.K_RIGHT, pg.K_RETURN):
-                    delta = -1 if key == pg.K_LEFT else 1
-                    target = change_preference(delta)
-                    if target:
+                elif not settings_editing and key == pg.K_LEFT:
+                    mode = 'main'
+                elif not settings_editing and key == pg.K_RETURN:
+                    if setting_key == 'hotkeys':
                         hotkeys_back = 'settings'
-                        mode = target
+                        mode = 'hotkeys'
+                    else:
+                        settings_editing = True
             elif mode == 'main':
                 if key in (pg.K_UP, pg.K_DOWN):
                     set_group(wrapped_index(group, 1 if key == pg.K_DOWN else -1,
@@ -610,7 +639,10 @@ def main():
                      COLORS['white'] if active else COLORS['text'], small)
         elif mode == 'settings':
             text('Настройки', 306, 126, COLORS['text'], heading)
-            text('Изменения сохраняются автоматически', 308, 170,
+            settings_hint = ('← / → — изменить, Enter — закончить'
+                             if settings_editing else
+                             'Enter или клик — выбрать параметр для изменения')
+            text(settings_hint, 308, 170,
                  COLORS['muted'], small)
             values = get_preferences()
             shown_values = {
@@ -622,14 +654,34 @@ def main():
                 'hotkeys': 'Открыть →',
             }
             for index, (caption, key) in enumerate(setting_rows):
-                rect = pg.Rect(306, 196 + index * 46, 600, 40)
+                rect = setting_rect(index)
                 active = index == settings_index
+                editing = active and settings_editing
                 rounded(pg, screen, rect,
-                        COLORS['accent'] if active else COLORS['background_alt'], 8)
+                        COLORS['accent'] if editing else COLORS['panel_alt'] if active
+                        else COLORS['background_alt'], 8)
+                rounded(pg, screen, rect,
+                        COLORS['accent_alt'] if editing else COLORS['accent'] if active
+                        else COLORS['border'], 8, 2 if active else 1)
                 text(caption, rect.x + 14, rect.y + 9,
-                     COLORS['white'] if active else COLORS['text'], typeface)
-                text(shown_values[key], rect.x + 390, rect.y + 10,
-                     COLORS['white'] if active else COLORS['accent_alt'], small)
+                     COLORS['white'] if editing else COLORS['text'], typeface)
+                if key == 'hotkeys':
+                    text(shown_values[key], 772, rect.y + 10,
+                         COLORS['accent_alt'], small)
+                else:
+                    left, right = setting_arrow_rects(index)
+                    for arrow, symbol in ((left, '‹'), (right, '›')):
+                        rounded(pg, screen, arrow,
+                                COLORS['accent_alt'] if editing else COLORS['panel'], 7)
+                        rounded(pg, screen, arrow, COLORS['border'], 7, 1)
+                        rendered = typeface.render(
+                            symbol, True, COLORS['black'] if editing else COLORS['text'])
+                        screen.blit(rendered, rendered.get_rect(center=arrow.center))
+                    rendered = small.render(
+                        shown_values[key], True,
+                        COLORS['white'] if editing else COLORS['accent_alt'])
+                    screen.blit(rendered,
+                                rendered.get_rect(center=(795, rect.centery)))
         elif mode == 'hotkeys':
             text('Горячие клавиши', 306, 126, COLORS['text'], heading)
             shortcuts = (
@@ -646,7 +698,10 @@ def main():
                 text(action, 510, y, COLORS['text'], small)
         rounded(pg, screen, pg.Rect(24, 562, 912, 24), COLORS['panel'], 8)
         footer = ('↑ ↓ разделы    Enter / → открыть    Esc выход' if mode == 'main' else
-                  '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action', 'toc', 'settings') else
+                  ('← → изменить    Enter готово    Esc отменить выбор'
+                   if mode == 'settings' and settings_editing else
+                   '↑ ↓ выбрать    Enter — изменить    Esc / ← назад') if mode == 'settings' else
+                  '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action', 'toc') else
                   'Esc / ← — вернуться на предыдущий экран' if mode == 'hotkeys' else
                   '↑ ↓ прокрутка    PgUp/PgDn страница    Esc / ← назад')
         text(footer + '    мышь поддерживается', 38, 566, COLORS['muted'], small)
@@ -662,8 +717,14 @@ def main():
                      'Изменить размер окна', 'Переключить полноэкранный режим',
                      'Показать все основные сочетания клавиш')
             for index, hint in enumerate(hints):
-                if pg.Rect(306, 196 + index * 46, 600, 40).collidepoint(mouse):
-                    tooltip = hint
+                if setting_rect(index).collidepoint(mouse):
+                    if index < len(setting_rows) - 1:
+                        left, right = setting_arrow_rects(index)
+                        tooltip = ('Предыдущее значение' if left.collidepoint(mouse)
+                                   else 'Следующее значение' if right.collidepoint(mouse)
+                                   else hint)
+                    else:
+                        tooltip = hint
                     break
         draw_tooltip(pg, screen, small, tooltip, mouse)
         present_scaled(pg, screen, window)
