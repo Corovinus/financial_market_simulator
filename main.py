@@ -99,6 +99,7 @@ def main():
     sidebar_rects = [pg.Rect(36, 145 + index * 44, 208, 36)
                      for index in range(len(GROUPS))]
     open_button = pg.Rect(306, 474, 180, 42)
+    back_button = pg.Rect(810, 31, 102, 34)
     reader_page_size = 16
 
     LOGGER.info('Application started: scale=%s speed=%s groups=%s',
@@ -159,6 +160,16 @@ def main():
         mode = 'main'
         LOGGER.info('Section selected via %s: index=%s name=%s',
                     source, group, GROUPS[group][0])
+
+    def go_back():
+        """Return one visible navigation level, just like Esc/Left."""
+        nonlocal mode
+        if mode == 'reader':
+            mode = reader_back
+        elif mode in ('action', 'toc'):
+            mode = 'items'
+        elif mode in ('items', 'exit'):
+            mode = 'main'
 
     def open_selected():
         """Activate the currently selected menu item."""
@@ -239,6 +250,9 @@ def main():
         nonlocal group, row, mode, choice, lines, scroll, horizontal
         nonlocal toc_index, toc_scroll, reader_back
         if position is None:
+            return
+        if mode != 'main' and back_button.collidepoint(position):
+            go_back()
             return
         for index, rect in enumerate(sidebar_rects):
             if rect.collidepoint(position):
@@ -357,7 +371,13 @@ def main():
         rounded(pg, screen, pg.Rect(24, 20, 912, 58), COLORS['panel'], 16)
         text('FAST', 48, 30, COLORS['accent'], heading)
         text('Финансовая торговая система', 150, 38, COLORS['text'], typeface)
-        text('Исследовательская версия', 720, 40, COLORS['muted'], small)
+        if mode == 'main':
+            text('Исследовательская версия', 720, 40, COLORS['muted'], small)
+        else:
+            rounded(pg, screen, back_button, COLORS['background_alt'], 8)
+            rounded(pg, screen, back_button, COLORS['border'], 8, 1)
+            text('← Назад', back_button.x + 14, back_button.y + 8,
+                 COLORS['text'], small)
 
         sidebar = pg.Rect(24, 98, 232, 450)
         card(pg, screen, sidebar, COLORS['panel'], COLORS['border'])

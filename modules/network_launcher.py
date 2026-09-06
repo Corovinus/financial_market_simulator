@@ -67,6 +67,7 @@ def run_network_launcher(scale=1.0):
     clock = pg.time.Clock()
     connect_button = pg.Rect(712, 489, 164, 38)
     start_button = pg.Rect(706, 492, 170, 38)
+    back_button = pg.Rect(804, 30, 104, 34)
 
     def write(value, x, y, color=None, face=None):
         label(pg, screen, face or body, value, (x, y),
@@ -173,6 +174,12 @@ def run_network_launcher(scale=1.0):
                 continue
             if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 position = mouse_position(pg, event, window, screen)
+                if position and mode != 'menu' and back_button.collidepoint(position):
+                    if editing_name:
+                        editing_name = False
+                    else:
+                        mode, status = 'menu', ''
+                    continue
                 if position and mode == 'menu':
                     for index in range(len(choices)):
                         if pg.Rect(110, 124 + index * 112, 740, 88).collidepoint(position):
@@ -268,7 +275,13 @@ def run_network_launcher(scale=1.0):
         pg.draw.circle(screen, (27, 64, 103), (900, 0), 260)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         write('Сетевая игра', 48, 30, COLORS['accent'], title)
-        write('Локальная студенческая сеть', 650, 39, COLORS['muted'], small)
+        if mode == 'menu':
+            write('Локальная студенческая сеть', 650, 39, COLORS['muted'], small)
+        else:
+            rounded(pg, screen, back_button, COLORS['background_alt'], 8)
+            rounded(pg, screen, back_button, COLORS['border'], 8, 1)
+            write('← Назад', back_button.x + 14, back_button.y + 8,
+                  COLORS['text'], small)
 
         if mode == 'menu':
             for index, (caption, detail) in enumerate(choices):
