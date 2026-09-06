@@ -10,7 +10,8 @@ from market.calculations import bond_value
 from market.config import parse_offer, read_par, Scenario
 from market.engine import Market
 from market.orderbook import OrderError
-from .display import cp866_bytes, open_scaled_display, present_scaled
+from .display import open_scaled_display, present_scaled
+from .theme import COLORS, card, font, label, mouse_position, rounded
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -51,11 +52,10 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
     import pygame as pg
 
     pg.init()
-    screen, window = open_scaled_display(pg, (640, 480), scale, 'FAST — BIDASK')
-    glyphs = _font(pg, ROOT / 'data/fonts/keyrus_8x16.bin')
-    blue, white, black = (0, 0, 170), (255, 255, 255), (0, 0, 0)
-    yellow, green, red, cyan = (255, 255, 0), (0, 255, 0), (255, 0, 0), (0, 255, 255)
-    grey, magenta = (170, 170, 170), (170, 0, 170)
+    screen, window = open_scaled_display(pg, (960, 600), scale, 'FAST — BIDASK')
+    body_font = font(pg, 18)
+    small_font = font(pg, 14)
+    title_font = font(pg, 28, bold=True)
     market = Market(scenario)
     market.start_period(0)
     period = 0
@@ -72,12 +72,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
     running = True
     clock = pg.time.Clock()
 
-    def write(value, x, y, color=white):
-        for code in cp866_bytes(value):
-            glyph = glyphs[code].copy()
-            glyph.fill((*color, 255), special_flags=pg.BLEND_RGBA_MULT)
-            screen.blit(glyph, (x, y))
-            x += 9
+    def write(value, x, y, color=None, face=None):
+        label(pg, screen, face or body_font, value, (x, y), color or COLORS['text'])
 
     def message(value, seconds=2.5):
         nonlocal status, status_until
@@ -87,65 +83,67 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
         return '' if quote is None else f'{quote.price}.{quote.quantity:02d}'
 
     def draw():
-        screen.fill(black)
-        pg.draw.rect(screen, white, (0, 0, 640, 20))
-        write('Торговая сессия', 72, 1, red)
-        write('Рынок облигаций', 340, 1, black)
-        pg.draw.rect(screen, yellow, (78, 20, 102, 17))
-        write(f'Попытка  1', 83, 21, black)
-        write(f'Период  {period + 1}', 207, 21, yellow)
-        write(f'Осталось (сек.): {max(0, int(remaining / 10))}', 362, 21, yellow)
-        write('Заявки на', 120, 40, yellow)
-        write('покупку', 84, 56, yellow)
-        write('продажу', 164, 56, yellow)
-        write('Кол-во', 249, 40, yellow)
-        write('бумаг', 258, 56, yellow)
+        screen.fill(COLORS['background'])
+        pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
+        rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
+        write('Торговая сессия', 48, 30, COLORS['accent'], title_font)
+        write('BID / ASK', 288, 38, COLORS['muted'], small_font)
+        write(f'Период {period + 1} / {scenario.periods}', 660, 34, COLORS['text'], body_font)
+        write(f'{max(0, int(remaining / 10))} сек.', 820, 34, COLORS['warning'], body_font)
+        pg.draw.rect(screen, COLORS['background_alt'], (48, 84, 580, 8), border_radius=4)
+        progress = max(0, min(1, remaining / max(1, scenario.duration_ticks)))
+        pg.draw.rect(screen, COLORS['accent'], (48, 84, int(580 * progress), 8), border_radius=4)
+        card(pg, screen, pg.Rect(36, 112, 592, 356), COLORS['panel'], COLORS['border'])
+        write('Книга заявок', 58, 132, COLORS['text'], body_font)
+        write('Bid', 234, 172, COLORS['buy'], small_font)
+        write('Ask', 402, 172, COLORS['sell'], small_font)
+        write('Позиция', 520, 172, COLORS['muted'], small_font)
         for index, name in enumerate(scenario.names):
-            y = 76 + index * 32
-            write(name[:8], 9, y + 8, yellow)
+            y = 202 + index * 72
+            write(name[:12], 58, y + 15, COLORS['text'], body_font)
             bid = market.book.best(index, 'bid')
             ask = market.book.best(index, 'ask')
-            for side, quote, x in (('bid', bid, 81), ('ask', ask, 165)):
-                color = green if quote is not None and quote.owner == 0 else yellow
-                field = pg.Rect(x, y, 73, 22)
-                pg.draw.rect(screen, blue if (index == selected_instrument and side == selected_side) else grey,
-                             field)
-                pg.draw.rect(screen, red if (index == selected_instrument and side == selected_side) else black,
-                             field, 1)
-                write(quote_text(quote), x + 5, y + 3, color)
-            write(str(market.portfolios[0].positions[index]), 262, y + 8, white)
+            for side, quote, x, side_color in (('bid', bid, 204, COLORS['buy']), ('ask', ask, 372, COLORS['sell'])):
+                selected = index == selected_instrument and side == selected_side
+                field = pg.Rect(x, y, 150, 42)
+                rounded(pg, screen, field, COLORS['background_alt'], 9)
+                rounded(pg, screen, field, COLORS['accent'] if selected else COLORS['border'], 9, 2 if selected else 1)
+                write(quote_text(quote) or '—', x + 14, y + 9,
+                      COLORS['white'] if quote and quote.owner == 0 else side_color, body_font)
+            write(str(market.portfolios[0].positions[index]), 536, y + 12, COLORS['text'], body_font)
             if scenario.hints and show_hints:
-                pg.draw.rect(screen, magenta, (322, y - 4, 77, 29))
-                write(f'{bond_value(scenario, index, period):.3f}', 330, y + 3, white)
-        pg.draw.rect(screen, grey, (12, 154, 172, 11))
-        write(f'Деньги       {market.portfolios[0].cash:.0f}', 20, 153, white)
-        pg.draw.rect(screen, grey, (196, 154, 143, 11))
-        write(f'Процент      {scenario.rates[period]}', 204, 153, white)
-        write('Последние сделки :', 216, 182, cyan)
+                rounded(pg, screen, pg.Rect(536, y + 44, 84, 24), COLORS['accent'], 6)
+                write(f'{bond_value(scenario, index, period):.3f}', 544, y + 47, COLORS['white'], small_font)
+        card(pg, screen, pg.Rect(654, 112, 282, 166), COLORS['panel'], COLORS['border'])
+        write('Счёт участника', 676, 132, COLORS['text'], body_font)
+        write('Деньги', 676, 178, COLORS['muted'], small_font)
+        write(f'{market.portfolios[0].cash:.0f}', 820, 174, COLORS['text'], body_font)
+        write('Ставка', 676, 218, COLORS['muted'], small_font)
+        write(f'{scenario.rates[period]}%', 820, 214, COLORS['text'], body_font)
+        card(pg, screen, pg.Rect(654, 300, 282, 168), COLORS['panel'], COLORS['border'])
+        write('Последние сделки', 676, 320, COLORS['text'], body_font)
         history = market.history_for(selected_instrument, 'ask') + market.history_for(selected_instrument, 'bid')
         for n, trade in enumerate(history[:3]):
-            write(f'{trade.price}.{trade.quantity:02d}', 225 + n * 90, 202, white)
+            write(f'{trade.price}.{trade.quantity:02d}', 676, 366 + n * 28, COLORS['accent_alt'], body_font)
         if result_screen:
-            pg.draw.rect(screen, white, (95, 260, 450, 96))
-            write('Достигнутые результаты', 205, 270, black)
-            write(f'Будущий капитал: {projected:.2f}', 150, 294, black)
+            rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['panel_alt'], 16)
+            rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['accent'], 2, 2)
+            write('Период завершён', 210, 250, COLORS['text'], title_font)
+            write(f'Будущий капитал: {projected:.2f}', 210, 304, COLORS['accent_alt'], body_font)
             if period + 1 == scenario.periods:
-                write(f'Очки: {market.score(projected):.2f}', 150, 310, black)
-        write(('Enter — следующий период   Esc — выход'
-                   if period + 1 < scenario.periods else
-                   'Enter — завершить попытку   Esc — выход'), 125, 326, red)
+                write(f'Очки: {market.score(projected):.2f}', 210, 340, COLORS['warning'], body_font)
+        action_text = ('Enter — следующий период   Esc — выход' if period + 1 < scenario.periods
+                       else 'Enter — завершить попытку   Esc — выход')
+        write(action_text, 54, 494, COLORS['muted'], small_font)
         if input_mode:
-            label = 'Покупаю: ' if input_mode == 'buy' else 'Продаю: ' if input_mode == 'sell' else 'Заявка: '
-            pg.draw.rect(screen, grey, (8, 407, 624, 28))
-            pg.draw.rect(screen, red, (8, 407, 624, 28), 1)
-            write(label + input_text + '_', 12, 416, yellow)
+            prompt = 'Покупаю: ' if input_mode == 'buy' else 'Продаю: ' if input_mode == 'sell' else 'Заявка: '
+            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['panel_alt'], 10)
+            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['accent'], 1, 2)
+            write(prompt + input_text + '_', 54, 538, COLORS['text'], body_font)
         elif status and time.monotonic() < status_until:
-            pg.draw.rect(screen, grey, (8, 407, 624, 28))
-            pg.draw.rect(screen, red, (8, 407, 624, 28), 1)
-            write(status[:68], 12, 416, yellow)
-        pg.draw.rect(screen, white, (0, 448, 640, 32))
-        write('↑ ↓ ← → Выбор  B Покупка  S Продажа  + Быстро  - Медленно  F9 Цены  E Выход',
-              23, 464, black)
+            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['panel_alt'], 10)
+            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['warning'], 1, 2)
+            write(status[:86], 54, 538, COLORS['warning'], body_font)
 
     while running:
         elapsed = clock.tick(60) / 1000.0
@@ -158,6 +156,18 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 running = False
+                continue
+            if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                position = mouse_position(pg, event, window, screen)
+                if position:
+                    x, y = position
+                    if 190 <= x <= 540 and 190 <= y <= 410:
+                        selected_instrument = 0 if y < 284 else min(1, len(scenario.names) - 1)
+                        selected_side = 'bid' if x < 360 else 'ask'
+                    elif 650 <= x <= 936 and 470 <= y <= 526:
+                        input_mode, input_text = 'buy', ''
+                    elif 650 <= x <= 936 and 526 <= y <= 580:
+                        input_mode, input_text = 'sell', ''
                 continue
             if event.type != pg.KEYDOWN:
                 continue

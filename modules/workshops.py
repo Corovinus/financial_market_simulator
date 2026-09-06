@@ -16,7 +16,8 @@ from .educational import (
     option_payoff,
     risk_premium_bound,
 )
-from .display import cp866_bytes, open_scaled_display, present_scaled
+from .display import open_scaled_display, present_scaled
+from .theme import COLORS, card, font, label as draw_label, mouse_position, rounded
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -185,10 +186,10 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
     import pygame as pg
 
     pg.init()
-    screen, window = open_scaled_display(pg, (720, 480), scale, "FAST — " + label)
-    glyphs = _font(pg, ROOT / "data/fonts/keyrus_8x16.bin")
-    white, black, blue = (255, 255, 255), (0, 0, 0), (0, 0, 170)
-    grey, green, yellow, cyan = (170, 170, 170), (0, 255, 0), (255, 255, 0), (0, 255, 255)
+    screen, window = open_scaled_display(pg, (960, 600), scale, "FAST — " + label)
+    body_font = font(pg, 17)
+    small_font = font(pg, 14)
+    title_font = font(pg, 27, bold=True)
     manual = []
     manual_path = ROOT / "data/converted/manual_sections.json"
     if manual_path.exists():
@@ -218,45 +219,40 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
     running, last = True, _calculate(label, fields)
     clock = pg.time.Clock()
 
-    def write(value, x, y, color=white):
-        for code in cp866_bytes(value):
-            glyph = glyphs[code].copy()
-            glyph.fill((*color, 255), special_flags=pg.BLEND_RGBA_MULT)
-            screen.blit(glyph, (x, y))
-            x += 9
+    def write(value, x, y, color=None, face=None):
+        draw_label(pg, screen, face or body_font, value, (x, y), color or COLORS['text'])
 
     def draw():
-        screen.fill(blue)
-        pg.draw.rect(screen, white, (0, 0, 720, 27))
+        screen.fill(COLORS['background'])
+        pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
+        rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
         frame_text = ""
         if label == "Опционы":
             frame_text = f"  Кадр {frame}: " + ("Сравнение портфелей" if frame == 1 else
                          "Опционные стратегии" if frame == 2 else "Желаемый график")
         elif label == "Портфель акций":
             frame_text = f"  Кадр {frame}/6"
-        write((title + frame_text)[:78], 12, 5, black)
+        write(title + frame_text, 48, 30, COLORS['accent'], title_font)
+        write(purpose, 50, 86, COLORS['muted'], small_font)
         if mode == "manual":
-            pg.draw.rect(screen, grey, (8, 35, 704, 405))
+            card(pg, screen, pg.Rect(36, 116, 888, 420), COLORS['panel'], COLORS['border'])
             for index, line in enumerate(manual[scroll:scroll + 24]):
-                write(line[:77], 16, 43 + index * 16, black)
+                write(line[:104], 58, 134 + index * 16, COLORS['text'], small_font)
             footer = "↑↓/PgUp/PgDn текст   Esc расчёт   Q выход"
         else:
-            write(purpose, 12, 38, yellow)
-            pg.draw.rect(screen, grey, (10, 62, 330, 270))
-            pg.draw.rect(screen, black, (10, 62, 330, 270), 1)
+            card(pg, screen, pg.Rect(36, 116, 410, 350), COLORS['panel'], COLORS['border'])
+            card(pg, screen, pg.Rect(468, 116, 456, 220), COLORS['panel'], COLORS['border'])
+            write('Параметры', 60, 140, COLORS['text'], body_font)
             for index, field in enumerate(fields):
-                y = 78 + index * 40
-                field_rect = pg.Rect(18, y - 3, 312, 28)
-                if index == selected:
-                    pg.draw.rect(screen, green, field_rect)
-                pg.draw.rect(screen, yellow if index == selected else black, field_rect, 1)
-                write(field.name, 25, y + 4, black)
-                write(field.display(), 245, y + 4, black)
-            pg.draw.rect(screen, grey, (352, 62, 356, 270))
-            pg.draw.rect(screen, black, (352, 62, 356, 270), 1)
-            write("РЕЗУЛЬТАТЫ", 370, 78, cyan)
+                y = 184 + index * 43
+                field_rect = pg.Rect(58, y - 5, 366, 34)
+                rounded(pg, screen, field_rect, COLORS['accent'] if index == selected else COLORS['background_alt'], 8)
+                rounded(pg, screen, field_rect, COLORS['accent_alt'] if index == selected else COLORS['border'], 8, 2 if index == selected else 1)
+                write(field.name, 72, y + 3, COLORS['white'], body_font)
+                write(field.display(), 320, y + 3, COLORS['accent_alt'], body_font)
+            write("РЕЗУЛЬТАТЫ", 494, 140, COLORS['text'], body_font)
             for index, line in enumerate(last[:14]):
-                write(line[:38], 370, 102 + index * 24, white)
+                write(line[:52], 494, 178 + index * 24, COLORS['text'], small_font)
             if label == "Опционы":
                 footer = "F1-F3 кадр  F9 пример  ↑↓ поле  ←→ изменить  Enter ввод  D текст  F10 сброс  Q выход"
             elif label == "Портфель акций":
@@ -264,39 +260,39 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
             else:
                 footer = "↑↓ поле  ←→ изменить  Enter ввод  D текст  F10 сброс  Esc выход"
             if label in ("Case OP1", "Case OP2", "Case OP3", "Опционы"):
-                pg.draw.rect(screen, black, (352, 342, 356, 96), 1)
-                write("График payoff", 365, 347, cyan)
-                pg.draw.line(screen, grey, (370, 420), (694, 420), 1)
-                pg.draw.line(screen, grey, (370, 360), (370, 428), 1)
+                card(pg, screen, pg.Rect(468, 354, 456, 112), COLORS['panel'], COLORS['border'])
+                write("График payoff", 492, 370, COLORS['text'], small_font)
+                pg.draw.line(screen, COLORS['border'], (510, 444), (888, 444), 1)
+                pg.draw.line(screen, COLORS['border'], (510, 390), (510, 452), 1)
                 strike = fields[1].value
                 maximum = max(fields[0].value * 2, strike * 2, 1)
                 points_call, points_put = [], []
                 for index in range(33):
                     spot = maximum * index / 32
-                    x = 370 + index * 10
-                    points_call.append((x, 420 - min(58, option_payoff(spot, strike, "call") * 2)))
-                    points_put.append((x, 420 - min(58, option_payoff(spot, strike, "put") * 2)))
-                pg.draw.lines(screen, green, False, points_call, 1)
-                pg.draw.lines(screen, yellow, False, points_put, 1)
+                    x = 510 + index * 12
+                    points_call.append((x, 444 - min(50, option_payoff(spot, strike, "call") * 2)))
+                    points_put.append((x, 444 - min(50, option_payoff(spot, strike, "put") * 2)))
+                pg.draw.lines(screen, COLORS['buy'], False, points_call, 2)
+                pg.draw.lines(screen, COLORS['warning'], False, points_put, 2)
             elif label in ("Дюрация", "Case B04"):
-                pg.draw.rect(screen, black, (352, 342, 356, 96), 1)
-                write("График стоимость/ставка", 365, 347, cyan)
-                pg.draw.line(screen, grey, (370, 420), (694, 420), 1)
-                pg.draw.line(screen, grey, (370, 360), (370, 428), 1)
+                card(pg, screen, pg.Rect(468, 354, 456, 112), COLORS['panel'], COLORS['border'])
+                write("График стоимость/ставка", 492, 370, COLORS['text'], small_font)
+                pg.draw.line(screen, COLORS['border'], (510, 444), (888, 444), 1)
+                pg.draw.line(screen, COLORS['border'], (510, 390), (510, 452), 1)
                 bars = [max(0.0, min(1.0, abs(float(value)) / 2000.0))
                         for value in (fields[1].value, fields[-1].value)]
                 for index, height in enumerate(bars):
-                    pg.draw.rect(screen, green if index == 0 else yellow,
-                                 (420 + index * 100, 420 - int(height * 55), 55, int(height * 55)))
-        pg.draw.rect(screen, white, (0, 448, 720, 32))
-        write(footer, 12, 456, black)
+                    pg.draw.rect(screen, COLORS['buy'] if index == 0 else COLORS['warning'],
+                                 (580 + index * 120, 444 - int(height * 55), 62, int(height * 55)), border_radius=5)
+        rounded(pg, screen, pg.Rect(36, 548, 888, 34), COLORS['panel'], 8)
+        write(footer, 52, 556, COLORS['muted'], small_font)
         if input_text:
-            pg.draw.rect(screen, grey, (8, 407, 704, 29))
-            pg.draw.rect(screen, yellow, (8, 407, 704, 29), 1)
+            rounded(pg, screen, pg.Rect(36, 492, 888, 42), COLORS['panel_alt'], 8)
+            rounded(pg, screen, pg.Rect(36, 492, 888, 42), COLORS['accent'], 1, 2)
         if status and time.monotonic() < status_until and not input_text:
-            pg.draw.rect(screen, grey, (8, 407, 704, 29))
-            pg.draw.rect(screen, yellow, (8, 407, 704, 29), 1)
-            write(status[:78], 14, 414, black)
+            rounded(pg, screen, pg.Rect(36, 492, 888, 42), COLORS['panel_alt'], 8)
+            rounded(pg, screen, pg.Rect(36, 492, 888, 42), COLORS['warning'], 1, 2)
+            write(status[:100], 52, 503, COLORS['warning'], small_font)
 
     def message(value, seconds=3.0):
         nonlocal status, status_until
@@ -306,6 +302,11 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
         for event in pg.event.get():
             if event.type == pg.QUIT:
                 running = False
+            elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
+                position = mouse_position(pg, event, window, screen)
+                if position and mode != "manual" and 50 <= position[0] <= 430 and 175 <= position[1] <= 466:
+                    selected = max(0, min(len(fields) - 1, (position[1] - 175) // 43))
+                continue
             elif event.type == pg.KEYDOWN:
                 key = event.key
                 if key in (pg.K_ESCAPE, pg.K_q):
@@ -370,7 +371,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
                     input_text = event.unicode
         draw()
         if input_text:
-            write("Ввод: " + input_text + "_", 14, 420, yellow)
+            write("Ввод: " + input_text + "_", 52, 503, COLORS['text'], body_font)
         present_scaled(pg, screen, window)
         clock.tick(max(1, int(30 * max(0.1, min(float(speed), 10.0)))))
     pg.quit()

@@ -6,7 +6,8 @@ from pathlib import Path
 
 from market.orderbook import OrderBook, OrderError
 from .bidask import _font
-from .display import cp866_bytes, open_scaled_display, present_scaled
+from .display import open_scaled_display, present_scaled
+from .theme import COLORS, card, font, label, mouse_position, rounded
 
 ROOT = Path(__file__).resolve().parents[1]
 SLD_SOURCE = ROOT / "data" / "converted" / "FTS_TUT.SLD.strings.txt"
@@ -182,11 +183,13 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0):
     import pygame as pg
 
     pg.init()
-    screen, window = open_scaled_display(pg, (640, 480), scale, "FAST — DEMO.EXE FTS_TUT")
-    glyphs = _font(pg, ROOT / "data/fonts/keyrus_8x16.bin")
-    C = {"blue": (0, 0, 170), "white": (255, 255, 255), "black": (0, 0, 0),
-         "yellow": (255, 255, 0), "green": (0, 255, 0), "cyan": (0, 255, 255),
-         "red": (255, 0, 0), "grey": (170, 170, 170), "brown": (130, 70, 20)}
+    screen, window = open_scaled_display(pg, (960, 600), scale, "FAST — DEMO.EXE FTS_TUT")
+    body_font = font(pg, 18)
+    small_font = font(pg, 15)
+    title_font = font(pg, 28, bold=True)
+    C = {"blue": COLORS["background"], "white": COLORS["text"], "black": COLORS["black"],
+         "yellow": COLORS["warning"], "green": COLORS["buy"], "cyan": COLORS["accent"],
+         "red": COLORS["danger"], "grey": COLORS["panel"], "brown": COLORS["panel_alt"]}
     page, text, mode, side_choice = 0, "", "", "bid"
     moved, confirm, help_visible, running = False, False, False, True
     cash, holdings = 4238, [5, 12]
@@ -194,13 +197,9 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0):
     status, status_until = "", 0.0
     clock = pg.time.Clock()
 
-    def write(value, x, y, color="white"):
-        rgb = C[color]
-        for code in cp866_bytes(value):
-            glyph = glyphs[code].copy()
-            glyph.fill((*rgb, 255), special_flags=pg.BLEND_RGBA_MULT)
-            screen.blit(glyph, (x, y))
-            x += 9
+    def write(value, x, y, color="white", face=None):
+        rgb = (C.get(color) or COLORS.get(color) or COLORS["text"]) if isinstance(color, str) else color
+        label(pg, screen, face or body_font, value, (x, y), rgb)
 
     def wrapped(value, x, y, color="black"):
         words, line, row = str(value).split(), "", 0
@@ -249,83 +248,81 @@ def run_introduction(speed: float = 1.0, scale: float = 1.0):
         return "нет" if value is None else "{}.{}".format(value.price, value.quantity)
 
     def market():
-        pg.draw.rect(screen, C["grey"], (10, 48, 620, 231))
-        write("Time remaining    298", 25, 56, "black"); write("ID:  1", 530, 56, "black")
-        write("Bid", 107, 78, "black"); write("Ask", 227, 78, "black"); write("Units", 382, 78, "black")
+        card(pg, screen, pg.Rect(36, 105, 888, 270), COLORS['panel'], COLORS['border'])
+        write("Time remaining    298", 60, 128, "muted", small_font); write("ID:  1", 810, 128, "white", small_font)
+        write("Bid", 280, 164, "buy", small_font); write("Ask", 470, 164, "sell", small_font); write("Units", 690, 164, "muted", small_font)
         for row, instrument in enumerate((CPBND, ZCP)):
-            y = 105 + row * 64
-            write("CpBnd" if instrument == CPBND else "ZCp", 26, y, "black")
+            y = 204 + row * 70
+            write("CpBnd" if instrument == CPBND else "ZCp", 60, y + 9, "white")
             bid, ask = book.best(instrument, "bid"), book.best(instrument, "ask")
-            bid_field = pg.Rect(96, y - 3, 96, 22)
-            ask_field = pg.Rect(216, y - 3, 96, 22)
+            bid_field = pg.Rect(230, y - 7, 160, 42)
+            ask_field = pg.Rect(420, y - 7, 160, 42)
             quote_page = SCENES[page][2] in ("quote", "invalid_quote")
             bid_active = page == 7 or quote_page and side_choice == "bid"
             ask_active = page == 7 or quote_page and side_choice == "ask"
-            pg.draw.rect(screen, C["red"] if bid_active else C["black"], bid_field, 1)
-            pg.draw.rect(screen, C["red"] if ask_active else C["black"], ask_field, 1)
-            write(quote_text(bid), 102, y, "green" if bid and bid.owner == 0 else "yellow")
-            write(quote_text(ask), 222, y, "green" if ask and ask.owner == 0 else "yellow")
-            write(str(holdings[instrument]), 390, y, "black")
-        pg.draw.line(screen, C["black"], (20, 232), (620, 232), 1)
-        write("Cash", 27, 244, "black"); write(str(cash), 93, 244, "black")
-        write("Int", 196, 244, "black"); write("25.00", 238, 244, "black")
-        write("Period 1", 365, 244, "black"); write("Trial 1", 490, 244, "black")
-        write("Last  0", 365, 262, "black")
+            rounded(pg, screen, bid_field, COLORS['background_alt'], 8)
+            rounded(pg, screen, bid_field, COLORS['accent'] if bid_active else COLORS['border'], 8, 2 if bid_active else 1)
+            rounded(pg, screen, ask_field, COLORS['background_alt'], 8)
+            rounded(pg, screen, ask_field, COLORS['accent'] if ask_active else COLORS['border'], 8, 2 if ask_active else 1)
+            write(quote_text(bid), 248, y + 2, "buy" if bid and bid.owner == 0 else "yellow")
+            write(quote_text(ask), 438, y + 2, "sell" if ask and ask.owner == 0 else "yellow")
+            write(str(holdings[instrument]), 700, y + 2, "white")
+        write("Cash", 60, 340, "muted", small_font); write(str(cash), 125, 336, "white")
+        write("Int", 250, 340, "muted", small_font); write("25.00", 295, 336, "white")
+        write("Period 1", 440, 340, "muted", small_font); write("Trial 1", 565, 336, "white")
+        write("Last  0", 720, 340, "muted", small_font)
 
     def draw():
-        screen.fill(C["blue"]); pg.draw.rect(screen, C["white"], (0, 0, 640, 31))
-        write("ФИНАНСОВАЯ ТОРГОВАЯ СИСТЕМА", 127, 7, "black")
+        screen.fill(C["blue"])
+        pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
+        rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
+        write("ФИНАНСОВАЯ ТОРГОВАЯ СИСТЕМА", 48, 30, "cyan", title_font)
+        write(f"Урок {page + 1} / {len(SCENES)}", 800, 36, "muted", small_font)
         title, lines, kind = SCENES[page]
         market_kinds = ("market", "select", "quote", "invalid_quote", "buy8",
                         "buy42", "sell5", "sell90", "invalid_qty", "cancel")
         if kind in market_kinds:
-            market(); pg.draw.rect(screen, C["white"], (10, 288, 620, 127))
-            write(title, 24, 299, "red")
+            market(); card(pg, screen, pg.Rect(36, 398, 888, 110), COLORS['panel'], COLORS['border'])
+            write(title, 60, 416, "yellow", body_font)
             for row, line in enumerate(lines):
-                wrapped(line, 24, 323 + row * 18)
+                wrapped(line, 60, 450 + row * 18, "white")
             if kind in ("quote", "invalid_quote"):
-                pg.draw.rect(screen, C["brown"], (10, 418, 620, 27))
-                write(("Bid" if side_choice == "bid" else "Ask") +
-                      " заявка: " + (text or "цена.количество"), 24, 423)
-                write("Введите цену.количество  Backspace  Esc отмена  Enter ввод", 24, 452)
+                rounded(pg, screen, pg.Rect(36, 518, 888, 42), COLORS['panel_alt'], 8)
+                write(("Bid" if side_choice == "bid" else "Ask") + " заявка: " + (text or "цена.количество"), 60, 528, "white")
             elif kind in ("buy8", "buy42", "sell5", "sell90", "invalid_qty"):
-                pg.draw.rect(screen, C["brown"], (10, 418, 620, 27))
-                write(("B купить" if mode == "buy" else "S продать") +
-                      "  Количество: " + (text or "0"), 24, 423)
-                write("B/S выбрать  Backspace  Esc отмена  Enter ввод", 24, 452)
+                rounded(pg, screen, pg.Rect(36, 518, 888, 42), COLORS['panel_alt'], 8)
+                write(("B купить" if mode == "buy" else "S продать") + "  Количество: " + (text or "0"), 60, 528, "white")
             else:
-                write("Стрелки — выбор позиции; Enter — продолжить; F10/Esc — выход",
-                      24, 424, "cyan")
+                write("Стрелки — выбор позиции; Enter — продолжить; F10/Esc — выход", 60, 528, "cyan", small_font)
         else:
-            pg.draw.rect(screen, C["white"], (25, 55, 590, 349))
-            write(title, 40, 72, "red" if page else "black")
+            card(pg, screen, pg.Rect(36, 105, 888, 405), COLORS['panel'], COLORS['border'])
+            write(title, 64, 140, "yellow" if page else "white", title_font)
             for row, line in enumerate(lines):
-                wrapped(line, 44, 112 + row * 24)
+                wrapped(line, 64, 202 + row * 28, "white")
             if kind == "f1":
-                write("Нажмите F1", 248, 333, "red")
+                write("Нажмите F1", 64, 410, "danger")
             elif kind == "finish":
-                write("Нажмите любую клавишу, чтобы выйти в меню FAST", 80, 365, "blue")
+                write("Нажмите любую клавишу, чтобы выйти в меню FAST", 64, 456, "cyan")
             else:
-                write("Enter/любая клавиша — следующий экран", 150, 365, "blue")
+                write("Enter/любая клавиша — следующий экран", 64, 456, "cyan")
         if status and time.monotonic() < status_until:
-            pg.draw.rect(screen, C["brown"], (10, 414, 620, 30))
-            pg.draw.rect(screen, C["red"], (10, 414, 620, 30), 1)
-            write(status[:68], 15, 430, "red")
-        pg.draw.rect(screen, C["grey"], (0, 460, 640, 20))
-        write("F1 помощь   PgUp/PgDn экран   Home начало   F10/Esc выход", 20, 462, "black")
+            rounded(pg, screen, pg.Rect(36, 518, 888, 42), COLORS['panel_alt'], 8)
+            rounded(pg, screen, pg.Rect(36, 518, 888, 42), COLORS['warning'], 1, 2)
+            write(status[:100], 60, 528, "yellow", small_font)
+        rounded(pg, screen, pg.Rect(24, 572, 912, 20), COLORS['panel'], 6)
+        write("F1 помощь   PgUp/PgDn экран   Home начало   F10/Esc выход", 42, 574, "muted", small_font)
         if help_visible:
-            pg.draw.rect(screen, C["black"], (95, 92, 450, 260))
-            write("F1 - данный текст", 125, 118, "white")
-            write("PgUp - следующий экран", 125, 148, "white")
-            write("PgDn - предыдущий экран", 125, 178, "white")
-            write("Home - первый экран", 125, 208, "white")
-            write("F10, Esc - выход", 125, 238, "white")
-            write("F1 - закрыть помощь", 125, 298, "yellow")
+            rounded(pg, screen, pg.Rect(190, 130, 580, 300), COLORS['background_alt'], 16)
+            rounded(pg, screen, pg.Rect(190, 130, 580, 300), COLORS['accent'], 2, 2)
+            write("Управление уроком", 236, 170, "white", title_font)
+            for index, line in enumerate(("F1 - этот текст", "PgUp - следующий экран", "PgDn - предыдущий экран", "Home - первый экран", "F10, Esc - выход")):
+                write(line, 246, 230 + index * 32, "white")
+            write("F1 - закрыть помощь", 246, 390, "yellow", small_font)
         if confirm:
-            pg.draw.rect(screen, C["black"], (65, 175, 510, 96))
-            write("Вы действительно хотите завершить работу с обучающей программой ?",
-                  80, 193, "white")
-            write("Y - Да       N - Нет", 235, 232, "yellow")
+            rounded(pg, screen, pg.Rect(160, 220, 640, 150), COLORS['background_alt'], 16)
+            rounded(pg, screen, pg.Rect(160, 220, 640, 150), COLORS['danger'], 2, 2)
+            write("Завершить урок?", 230, 255, "white", title_font)
+            write("Y / Enter — Да       N / Esc — Нет", 270, 315, "yellow")
 
     while running:
         for event in pg.event.get():
