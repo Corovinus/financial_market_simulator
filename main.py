@@ -12,7 +12,8 @@ from modules.display import open_scaled_display, present_scaled
 from modules.theme import COLORS, card, font, label, mouse_position, rounded
 
 ROOT = Path(__file__).resolve().parent
-LOG_PATH = ROOT / 'fast.log'
+APP_ROOT = Path(sys.executable).resolve().parent if getattr(sys, 'frozen', False) else ROOT
+LOG_PATH = APP_ROOT / 'fast.log'
 LOGGER = logging.getLogger('fast')
 
 

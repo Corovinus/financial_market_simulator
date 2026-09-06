@@ -7,6 +7,20 @@
 
 ## Запуск
 
+Готовую Windows-сборку можно запускать двойным кликом по `FAST.exe`: Python и
+библиотеки на компьютере пользователя не нужны. Файл `fast.log` создаётся рядом
+с программой.
+
+Чтобы собрать `FAST.exe` самостоятельно:
+
+```powershell
+python -m venv .venv
+.\.venv\Scripts\python.exe -m pip install -r requirements.txt -r requirements-build.txt
+.\build_exe.ps1
+```
+
+Результат появится в `dist\FAST.exe`. Для обычного запуска из исходников:
+
 ```text
 cd financial_market_simulator
 pip install -r requirements.txt
