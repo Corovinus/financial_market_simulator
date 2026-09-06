@@ -21,9 +21,8 @@ class Market:
     """Manual and robot-facing market state.
 
     Actor 0 is the human.  Actors 1..robots are initialized from the same PAR
-    row, as the original BIDASK initialization does.  This does not invent a
-    robot strategy; a RobotController can call the same ``submit``/``take``
-    methods when its recovered decision tree is available.
+    row, as the original BIDASK initialization does. ``RobotController`` calls
+    the same ``submit``/``take`` methods for autonomous participants.
     """
     def __init__(self, scenario: Scenario):
         if not isinstance(scenario, Scenario):

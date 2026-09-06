@@ -11,6 +11,7 @@ from market.calculations import bond_value
 from market.config import parse_offer, read_par, Scenario
 from market.engine import Market
 from market.orderbook import OrderError
+from market.robots import RobotController
 from .display import open_scaled_display, present_scaled
 from .theme import COLORS, card, font, label, mouse_position, rounded
 
@@ -42,8 +43,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
 
     ``speed`` scales the original decisecond clock.  The default therefore
     keeps the original pace; ``--speed 100`` is convenient for a quick check.
-    The recovered robot decision tree is intentionally not called here until
-    its remaining Real48 branches are verified against DOS.
+    Autonomous participants use the original reaction interval, valuation
+    initialization, action types and random-number generator.
     """
     if isinstance(scenario, (str, Path)):
         scenario = read_par(scenario)
@@ -61,6 +62,10 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     title_font = font(pg, 28, bold=True)
     market = Market(scenario)
     market.start_period(0)
+    robots = RobotController(market)
+    LOGGER.info('Robot controller started: robots=%s wolves=%s reaction=%s strategy=%s',
+                scenario.robots, scenario.wolves, scenario.reaction_ticks,
+                scenario.strategy)
     period = 0
     remaining = float(scenario.duration_ticks)
     selected_instrument = 0
@@ -70,6 +75,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     input_text = ''
     status = ''
     status_until = 0.0
+    last_robot_event = ''
     projected = None
     result_screen = False
     running = True
@@ -132,11 +138,14 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         write(f'{market.portfolios[0].cash:.0f}', 820, 174, COLORS['text'], body_font)
         write('Ставка', 676, 218, COLORS['muted'], small_font)
         write(f'{scenario.rates[period]}%', 820, 214, COLORS['text'], body_font)
+        write('Участники', 676, 252, COLORS['muted'], small_font)
+        write(str(scenario.robots + 1), 820, 248, COLORS['text'], body_font)
         card(pg, screen, pg.Rect(654, 300, 282, 168), COLORS['panel'], COLORS['border'])
         write('Последние сделки', 676, 320, COLORS['text'], body_font)
         history = market.history_for(selected_instrument, 'ask') + market.history_for(selected_instrument, 'bid')
         for n, trade in enumerate(history[:3]):
-            write(f'{trade.price}.{trade.quantity:02d}', 676, 366 + n * 28, COLORS['accent_alt'], body_font)
+            write(f'{trade.price}.{trade.quantity:02d}  ID {trade.buyer + 1}/{trade.seller + 1}',
+                  676, 366 + n * 28, COLORS['accent_alt'], small_font)
         if result_screen:
             rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['panel_alt'], 16)
             rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['accent'], 2, 2)
@@ -161,11 +170,24 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['panel_alt'], 10)
             rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['warning'], 1, 2)
             write(status[:86], 54, 538, COLORS['warning'], body_font)
+        elif last_robot_event:
+            write(last_robot_event[:86], 54, 538, COLORS['muted'], small_font)
 
     while running:
         elapsed = clock.tick(60) / 1000.0
         if not result_screen and input_mode is None:
-            remaining -= elapsed * 10.0 * float(speed)
+            elapsed_ticks = min(remaining, elapsed * 10.0 * float(speed))
+            remaining -= elapsed_ticks
+            for robot_event in robots.step(elapsed_ticks):
+                verb = {'bid': 'Bid', 'ask': 'Ask', 'buy': 'купил',
+                        'sell': 'продал'}[robot_event.action]
+                last_robot_event = (f'ID {robot_event.actor + 1}: {verb} '
+                                    f'{scenario.names[robot_event.instrument]} '
+                                    f'{robot_event.price}.{robot_event.quantity:02d}')
+                LOGGER.info('Robot action: actor=%s instrument=%s action=%s price=%s quantity=%s',
+                            robot_event.actor, robot_event.instrument,
+                            robot_event.action, robot_event.price,
+                            robot_event.quantity)
             if remaining <= 0:
                 projected = market.finish_period()
                 result_screen = True
@@ -198,6 +220,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                     if period + 1 < scenario.periods:
                         period += 1
                         market.start_period(period)
+                        robots.start_period(period)
                         remaining = float(scenario.duration_ticks)
                         result_screen = False
                     else:

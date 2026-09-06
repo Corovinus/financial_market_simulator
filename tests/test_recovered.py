@@ -8,6 +8,7 @@ from market.calculations import bond_value, settle, future_capital
 from market.rng import OriginalRNG
 from market.engine import Market
 from market.orderbook import OrderError
+from market.robots import RobotController
 from modules.educational import (
     binomial_option, capm_statistics, macaulay_duration, risk_premium_bound,
 )
@@ -104,6 +105,29 @@ class OriginalCases(unittest.TestCase):
         self.assertEqual([q.price for q in book.quotes(0, 'bid')], [110])
         book.take(3, 0, 'sell', 1)
         self.assertIsNone(book.best(0, 'bid'))
+
+    def test_original_robots_react_and_trade(self):
+        scenario = read_par(ROOT / 'data/original/B01.PAR')
+        market = Market(scenario)
+        market.start_period(0)
+        robots = RobotController(market, seed=0)
+        fair = [bond_value(scenario, instrument, 0)
+                for instrument in range(len(scenario.names))]
+        self.assertEqual(robots.values[0], tuple(fair))
+        self.assertTrue(all(0.8 * expected <= actual <= 1.2 * expected
+                            for actual, expected in zip(robots.values[-1], fair)))
+        self.assertEqual(robots.step(scenario.reaction_ticks), ())
+        events = robots.step(0.001)
+        self.assertTrue(events)
+        self.assertTrue(any(market.book.best(instrument, side) is not None
+                            for instrument in range(len(scenario.names))
+                            for side in ('bid', 'ask')))
+        for _ in range(30):
+            events += robots.step(scenario.reaction_ticks)
+        self.assertTrue(any(event.action in ('buy', 'sell') for event in events))
+        self.assertTrue(any(market.history_for(instrument, side)
+                            for instrument in range(len(scenario.names))
+                            for side in ('bid', 'ask')))
 
     def test_settlement_preserves_word_products_and_positions(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
