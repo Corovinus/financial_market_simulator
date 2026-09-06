@@ -4,3 +4,4 @@ tools/vendor/
 data/reference_work/
 data/reference_other/
 *.pyc
+fast.log*

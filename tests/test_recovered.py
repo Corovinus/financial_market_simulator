@@ -12,7 +12,7 @@ from modules.educational import (
     binomial_option, capm_statistics, macaulay_duration, risk_premium_bound,
 )
 from market.levels import CUSTOM_LEVELS, CustomLevel, add_level
-from main import build_groups
+from main import build_groups, wrapped_index
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -135,6 +135,14 @@ class OriginalCases(unittest.TestCase):
             self.assertIn(('Тестовый уровень', ''), build_groups()[-2][1])
         finally:
             del CUSTOM_LEVELS[before:]
+
+    def test_menu_navigation_handles_empty_sections(self):
+        self.assertEqual(wrapped_index(0, 1, 0), 0)
+        index = 0
+        for _ in range(1000):
+            index = wrapped_index(index, 1, 8)
+        self.assertEqual(index, 0)
+        self.assertEqual(wrapped_index(0, -1, 8), 7)
 
 
 if __name__ == '__main__':

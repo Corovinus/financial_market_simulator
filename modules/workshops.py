@@ -222,6 +222,10 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
     def write(value, x, y, color=None, face=None):
         draw_label(pg, screen, face or body_font, value, (x, y), color or COLORS['text'])
 
+    def field_rects():
+        return [pg.Rect(58, 179 + index * 43, 366, 34)
+                for index in range(len(fields))]
+
     def draw():
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
@@ -243,9 +247,8 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
             card(pg, screen, pg.Rect(36, 116, 410, 350), COLORS['panel'], COLORS['border'])
             card(pg, screen, pg.Rect(468, 116, 456, 220), COLORS['panel'], COLORS['border'])
             write('Параметры', 60, 140, COLORS['text'], body_font)
-            for index, field in enumerate(fields):
+            for index, (field, field_rect) in enumerate(zip(fields, field_rects())):
                 y = 184 + index * 43
-                field_rect = pg.Rect(58, y - 5, 366, 34)
                 rounded(pg, screen, field_rect, COLORS['accent'] if index == selected else COLORS['background_alt'], 8)
                 rounded(pg, screen, field_rect, COLORS['accent_alt'] if index == selected else COLORS['border'], 8, 2 if index == selected else 1)
                 write(field.name, 72, y + 3, COLORS['white'], body_font)
@@ -304,8 +307,11 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0):
                 running = False
             elif event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 position = mouse_position(pg, event, window, screen)
-                if position and mode != "manual" and 50 <= position[0] <= 430 and 175 <= position[1] <= 466:
-                    selected = max(0, min(len(fields) - 1, (position[1] - 175) // 43))
+                clicked = (next((index for index, rect in enumerate(field_rects())
+                                 if rect.collidepoint(position)), None)
+                           if position and mode != "manual" else None)
+                if clicked is not None:
+                    selected = clicked
                 continue
             elif event.type == pg.KEYDOWN:
                 key = event.key

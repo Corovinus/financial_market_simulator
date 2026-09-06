@@ -4,6 +4,7 @@ The market rules live in :mod:`market`; this module only handles the keyboard
 and the 640x480 text-mode presentation used by B01/B02.
 """
 from pathlib import Path
+import logging
 import time
 
 from market.calculations import bond_value
@@ -15,6 +16,7 @@ from .theme import COLORS, card, font, label, mouse_position, rounded
 
 
 ROOT = Path(__file__).resolve().parents[1]
+LOGGER = logging.getLogger('fast.bidask')
 
 
 def _font(pygame, path: Path):
@@ -82,6 +84,15 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
     def quote_text(quote):
         return '' if quote is None else f'{quote.price}.{quote.quantity:02d}'
 
+    def quote_rects():
+        for index in range(len(scenario.names)):
+            y = 202 + index * 72
+            yield index, 'bid', pg.Rect(204, y, 150, 42)
+            yield index, 'ask', pg.Rect(372, y, 150, 42)
+
+    buy_button = pg.Rect(654, 482, 132, 38)
+    sell_button = pg.Rect(804, 482, 132, 38)
+
     def draw():
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, (22, 58, 92), (920, 0), 250)
@@ -135,6 +146,11 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
         action_text = ('Enter — следующий период   Esc — выход' if period + 1 < scenario.periods
                        else 'Enter — завершить попытку   Esc — выход')
         write(action_text, 54, 494, COLORS['muted'], small_font)
+        if not result_screen:
+            rounded(pg, screen, buy_button, COLORS['buy'], 9)
+            rounded(pg, screen, sell_button, COLORS['sell'], 9)
+            write('B  Купить', buy_button.x + 20, buy_button.y + 9, COLORS['black'], small_font)
+            write('S  Продать', sell_button.x + 18, sell_button.y + 9, COLORS['black'], small_font)
         if input_mode:
             prompt = 'Покупаю: ' if input_mode == 'buy' else 'Продаю: ' if input_mode == 'sell' else 'Заявка: '
             rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['panel_alt'], 10)
@@ -159,14 +175,16 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0, scale: floa
                 continue
             if event.type == pg.MOUSEBUTTONDOWN and event.button == 1:
                 position = mouse_position(pg, event, window, screen)
-                if position:
-                    x, y = position
-                    if 190 <= x <= 540 and 190 <= y <= 410:
-                        selected_instrument = 0 if y < 284 else min(1, len(scenario.names) - 1)
-                        selected_side = 'bid' if x < 360 else 'ask'
-                    elif 650 <= x <= 936 and 470 <= y <= 526:
+                if position and not result_screen:
+                    selected_quote = next(((index, side) for index, side, rect in quote_rects()
+                                           if rect.collidepoint(position)), None)
+                    if selected_quote:
+                        selected_instrument, selected_side = selected_quote
+                        LOGGER.info('Quote selected via mouse: instrument=%s side=%s',
+                                    selected_instrument, selected_side)
+                    elif buy_button.collidepoint(position):
                         input_mode, input_text = 'buy', ''
-                    elif 650 <= x <= 936 and 526 <= y <= 580:
+                    elif sell_button.collidepoint(position):
                         input_mode, input_text = 'sell', ''
                 continue
             if event.type != pg.KEYDOWN:

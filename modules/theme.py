@@ -54,6 +54,7 @@ def mouse_position(pygame, event, window, canvas):
     """Convert a resizable-window mouse position to logical canvas pixels."""
     if not hasattr(event, "pos"):
         return None
+    window = pygame.display.get_surface() or window
     width, height = window.get_size()
     base_width, base_height = canvas.get_size()
     factor = min(width / base_width, height / base_height)
@@ -64,4 +65,3 @@ def mouse_position(pygame, event, window, canvas):
     if 0 <= x < base_width and 0 <= y < base_height:
         return int(x), int(y)
     return None
-
