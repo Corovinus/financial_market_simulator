@@ -18,6 +18,8 @@ from .robots import RobotController
 
 LOGGER = logging.getLogger('fast.network')
 DEFAULT_PORT = 8765
+DISCOVERY_PORT = 8766
+DISCOVERY_REQUEST = b'FAST_DISCOVER_V1'
 MAX_MESSAGE = 65_536
 
 
@@ -322,14 +324,18 @@ class _ThreadingServer(socketserver.ThreadingTCPServer):
 
 class LanServer:
     def __init__(self, scenario, host='0.0.0.0', port=DEFAULT_PORT,
-                 human_slots=4, bots=4, seed=0, admin_key=None):
+                 human_slots=4, bots=4, seed=0, admin_key=None,
+                 room_name='Игра FAST', discovery=True):
         self.session = GameSession(scenario, human_slots, bots, seed)
         self.admin_key = admin_key or secrets.token_urlsafe(6)
+        self.room_name = str(room_name).strip()[:40] or 'Игра FAST'
+        self.discovery = discovery
         self._server = _ThreadingServer((host, port), _RequestHandler)
         self._server.session = self.session
         self._server.admin_key = self.admin_key
         self._stop = threading.Event()
         self._threads = []
+        self._discovery_socket = None
 
     @property
     def address(self):
@@ -343,16 +349,62 @@ class LanServer:
         server_thread.start()
         timer_thread.start()
         self._threads = [server_thread, timer_thread]
+        if self.discovery:
+            self._start_discovery()
         LOGGER.info('LAN server started on %s:%s', *self.address)
         return self
 
     def stop(self):
         self._stop.set()
+        if self._discovery_socket is not None:
+            self._discovery_socket.close()
         self._server.shutdown()
         self._server.server_close()
         for thread in self._threads:
             thread.join(timeout=2)
         LOGGER.info('LAN server stopped')
+
+    def _start_discovery(self):
+        try:
+            probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+            probe.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            probe.bind(('', DISCOVERY_PORT))
+            probe.settimeout(0.2)
+        except OSError:
+            LOGGER.warning('LAN discovery is unavailable', exc_info=True)
+            return
+        self._discovery_socket = probe
+        thread = threading.Thread(target=self._answer_discovery,
+                                  name='fast-lan-discovery', daemon=True)
+        thread.start()
+        self._threads.append(thread)
+
+    def _answer_discovery(self):
+        while not self._stop.is_set():
+            try:
+                data, address = self._discovery_socket.recvfrom(512)
+                if data != DISCOVERY_REQUEST:
+                    continue
+                state = self.session.state()
+                if (state['phase'] != 'lobby' or
+                        len(state['connected']) >= state['human_slots']):
+                    continue
+                answer = {
+                    'protocol': 'FAST_LAN_V1', 'name': self.room_name,
+                    'port': self.address[1], 'phase': state['phase'],
+                    'players': len(state['connected']),
+                    'capacity': state['human_slots'], 'bots': state['bots'],
+                    'instruments': len(state['book']),
+                }
+                self._discovery_socket.sendto(
+                    json.dumps(answer, ensure_ascii=False).encode('utf-8'),
+                    address)
+            except socket.timeout:
+                pass
+            except OSError:
+                if not self._stop.is_set():
+                    LOGGER.warning('LAN discovery response failed', exc_info=True)
+                return
 
     def _timer(self):
         previous = time.monotonic()
@@ -410,3 +462,59 @@ def local_address():
         return '127.0.0.1'
     finally:
         probe.close()
+
+
+def discover_games(timeout=0.5, targets=None):
+    """Return joinable FAST rooms which answer a UDP broadcast."""
+    if not isinstance(timeout, (int, float)) or timeout <= 0:
+        raise ValueError('Время поиска должно быть положительным')
+    if targets is None:
+        destinations = {'255.255.255.255', '127.0.0.1'}
+        try:
+            addresses = {item[4][0] for item in socket.getaddrinfo(
+                socket.gethostname(), None, socket.AF_INET)}
+            addresses.add(local_address())
+            for address in addresses:
+                octets = address.split('.')
+                if len(octets) == 4 and address != '127.0.0.1':
+                    destinations.add('.'.join(octets[:3] + ['255']))
+        except OSError:
+            pass
+    else:
+        destinations = targets
+    found = {}
+    probe = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        probe.setsockopt(socket.SOL_SOCKET, socket.SO_BROADCAST, 1)
+        probe.bind(('', 0))
+        for target in destinations:
+            try:
+                probe.sendto(DISCOVERY_REQUEST, (target, DISCOVERY_PORT))
+            except OSError:
+                LOGGER.debug('Discovery request failed for %s', target,
+                             exc_info=True)
+        deadline = time.monotonic() + timeout
+        while True:
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                break
+            probe.settimeout(remaining)
+            try:
+                data, address = probe.recvfrom(4096)
+            except socket.timeout:
+                break
+            try:
+                room = json.loads(data.decode('utf-8'))
+                if (room.get('protocol') != 'FAST_LAN_V1' or
+                        room.get('phase') != 'lobby'):
+                    continue
+                room['host'] = address[0]
+                room['address'] = f'{address[0]}:{int(room["port"])}'
+                found[room['address']] = room
+            except (UnicodeDecodeError, json.JSONDecodeError, KeyError,
+                    TypeError, ValueError):
+                continue
+    finally:
+        probe.close()
+    return sorted(found.values(), key=lambda room: (room['name'],
+                                                     room['address']))

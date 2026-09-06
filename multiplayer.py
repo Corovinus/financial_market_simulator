@@ -36,7 +36,7 @@ def host_game(args, generated=False):
         if args.reaction is not None:
             scenario = replace(scenario, reaction_ticks=round(args.reaction * 10))
     server = LanServer(scenario, args.bind, args.port, args.players,
-                       args.bots, seed).start()
+                       args.bots, seed, room_name=args.room_name).start()
     address = local_address()
     print(f'Комната: {address}:{server.address[1]}')
     print(f'Ключ администратора: {server.admin_key}')
@@ -77,6 +77,7 @@ def parser():
     admin.add_argument('--bots', type=int, default=2)
     admin.add_argument('--duration', type=float, help='Длительность периода, сек.')
     admin.add_argument('--reaction', type=float, help='Реакция роботов, сек.')
+    admin.add_argument('--room-name', default='Занятие FAST')
 
     host = commands.add_parser('host', help='Создать игру с умным рандомом')
     host.add_argument('--name', default=getpass.getuser())
@@ -85,6 +86,7 @@ def parser():
     host.add_argument('--seed', type=int)
     host.add_argument('--players', type=int, default=4)
     host.add_argument('--bots', type=int, default=4)
+    host.add_argument('--room-name', default='Быстрая игра FAST')
 
     join = commands.add_parser('join', help='Подключиться к комнате')
     join.add_argument('address', help='IP сервера или IP:порт')

@@ -12,6 +12,7 @@ from market.robots import RobotController
 from modules.educational import (
     binomial_option, capm_statistics, macaulay_duration, risk_premium_bound,
 )
+from modules.document import document_lines, is_formula, pretty_formula, table_of_contents
 from market.levels import CUSTOM_LEVELS, CustomLevel, add_level
 from main import build_groups, wrapped_index
 
@@ -19,6 +20,20 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OriginalCases(unittest.TestCase):
+    def test_manual_contents_and_formula_formatting(self):
+        sections = json.loads(
+            (ROOT / 'data/converted/manual_sections.json').read_text(
+                encoding='utf-8'))
+        contents = table_of_contents(sections['Оглавление'], sections)
+        self.assertEqual(len(contents), 22)
+        self.assertEqual(contents[0], 'Программа F A S T')
+        self.assertEqual(contents[-1],
+                         'Описание RE3.Роль производных бумаг - опционов')
+        formula = pretty_formula('u = exp(2.40/sqrt(12)); sigma^2 * Delta t')
+        self.assertEqual(formula, 'u = exp(2.40/√(12)); σ² · Δt')
+        self.assertTrue(is_formula(formula))
+        self.assertNotIn('│', ''.join(document_lines('│ текст │')))
+
     def test_dos_no_trade_results(self):
         for filename in ('b01_no_trades.json', 'b02_no_trades.json'):
             with self.subTest(case=filename):

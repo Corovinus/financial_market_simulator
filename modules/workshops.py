@@ -17,6 +17,7 @@ from .educational import (
     risk_premium_bound,
 )
 from .display import open_scaled_display, present_scaled
+from .document import document_lines, is_formula, pretty_formula
 from .theme import COLORS, card, font, label as draw_label, mouse_position, rounded
 
 
@@ -191,6 +192,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
     body_font = font(pg, 17)
     small_font = font(pg, 14)
     title_font = font(pg, 27, bold=True)
+    formula_font = font(pg, 14)
     manual = []
     manual_path = ROOT / "data/converted/manual_sections.json"
     if manual_path.exists():
@@ -214,7 +216,7 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
         prefix = prefixes.get(label, "Описание " + label)
         key = next((name for name in sections if name.startswith(prefix)), None)
         if key:
-            manual = sections[key].replace("`", "").replace("|", "").splitlines()
+            manual = document_lines(sections[key])
     selected, input_text, mode, scroll, frame = 0, "", "calc", 0, 1
     status, status_until = "", 0.0
     running, last = True, _calculate(label, fields)
@@ -242,7 +244,14 @@ def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
         if mode == "manual":
             card(pg, screen, pg.Rect(36, 116, 888, 420), COLORS['panel'], COLORS['border'])
             for index, line in enumerate(manual[scroll:scroll + 24]):
-                write(line[:104], 58, 134 + index * 16, COLORS['text'], small_font)
+                y = 134 + index * 16
+                shown = pretty_formula(line)[:104]
+                if is_formula(line):
+                    rounded(pg, screen, pg.Rect(50, y - 1, 856, 16),
+                            COLORS['background_alt'], 4)
+                    write(shown, 62, y, COLORS['accent_alt'], formula_font)
+                else:
+                    write(shown, 58, y, COLORS['text'], small_font)
             footer = "↑↓/PgUp/PgDn текст   Esc расчёт   Q выход"
         else:
             card(pg, screen, pg.Rect(36, 116, 410, 350), COLORS['panel'], COLORS['border'])

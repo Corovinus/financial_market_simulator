@@ -7,6 +7,7 @@ from pathlib import Path
 import sys
 
 from market.levels import CUSTOM_LEVELS
+from modules.document import document_lines, is_formula, pretty_formula, table_of_contents
 from modules.display import open_scaled_display, present_scaled
 from modules.theme import COLORS, card, font, label, mouse_position, rounded
 
@@ -69,21 +70,28 @@ def main():
     typeface = None
     small = None
     heading = None
+    formula = None
+    document_heading = None
 
     def reset_display():
-        nonlocal screen, window, typeface, small, heading
+        nonlocal screen, window, typeface, small, heading, formula, document_heading
         pg.init()
         screen, window = open_scaled_display(pg, (960, 600), args.scale,
                                               'FAST — исследовательская версия')
         typeface = font(pg, 18)
         small = font(pg, 14)
         heading = font(pg, 30, bold=True)
+        formula = font(pg, 15)
+        document_heading = font(pg, 22, bold=True)
 
     reset_display()
     sections = json.loads((ROOT / 'data/converted/manual_sections.json').read_text(encoding='utf-8'))
+    toc_entries = table_of_contents(sections['Оглавление'], sections)
     group = row = choice = scroll = horizontal = 0
+    toc_index = toc_scroll = 0
     mode = 'main'
     lines = []
+    reader_back = 'items'
     running = True
     clock = pg.time.Clock()
     sidebar_rects = [pg.Rect(36, 145 + index * 44, 208, 36)
@@ -120,7 +128,7 @@ def main():
             ]
         title = next((name for name in sections if prefix and name.startswith(prefix)), None)
         if title:
-            return [title, ''] + sections[title].replace('`', '').replace('|', '').splitlines()
+            return [title, ''] + document_lines(sections[title])
         custom = next((level for level in CUSTOM_LEVELS if level.name == label_value), None)
         if custom:
             scenario = custom.scenario
@@ -152,7 +160,7 @@ def main():
 
     def open_selected():
         """Activate the currently selected menu item."""
-        nonlocal mode, choice, lines, scroll, horizontal
+        nonlocal mode, choice, lines, scroll, horizontal, reader_back
         if group == len(GROUPS) - 1:
             mode = 'exit'
             return
@@ -176,17 +184,22 @@ def main():
             LOGGER.info('Module closed: introduction; main display restored=%s',
                         pg.display.get_init())
             return
+        if label_value == 'Оглавление':
+            mode = 'toc'
+            return
         if group >= 2:
             mode, choice = 'action', 0
             return
         lines = description_lines(label_value, prefix)
+        reader_back = 'items'
         mode, scroll, horizontal = 'reader', 0, 0
 
     def activate_action():
-        nonlocal mode, lines, scroll, horizontal
+        nonlocal mode, lines, scroll, horizontal, reader_back
         label_value, prefix = GROUPS[group][1][row]
         if choice == 0:
             lines = description_lines(label_value, prefix)
+            reader_back = 'action'
             mode, scroll, horizontal = 'reader', 0, 0
             LOGGER.info('Description opened: %s', label_value)
             return
@@ -222,6 +235,7 @@ def main():
     def click_action(position):
         """Make the menu usable with a mouse without changing keyboard flow."""
         nonlocal group, row, mode, choice, lines, scroll, horizontal
+        nonlocal toc_index, toc_scroll, reader_back
         if position is None:
             return
         for index, rect in enumerate(sidebar_rects):
@@ -247,6 +261,17 @@ def main():
                 LOGGER.info('Action clicked: item=%s choice=%s',
                             GROUPS[group][1][row][0], choice)
                 activate_action()
+        elif mode == 'toc':
+            visible = toc_entries[toc_scroll:toc_scroll + 11]
+            for offset, _title in enumerate(visible):
+                rect = pg.Rect(306, 184 + offset * 30, 600, 26)
+                if rect.collidepoint(position):
+                    toc_index = toc_scroll + offset
+                    target = toc_entries[toc_index]
+                    lines = [target, ''] + document_lines(sections[target])
+                    reader_back = 'toc'
+                    mode, scroll, horizontal = 'reader', 0, 0
+                    return
 
     while running:
         for event in pg.event.get():
@@ -257,12 +282,16 @@ def main():
                 continue
             if event.type == pg.MOUSEWHEEL and mode == 'reader':
                 scroll = max(0, min(reader_limit(), scroll - event.y * 3))
+            elif event.type == pg.MOUSEWHEEL and mode == 'toc':
+                toc_index = max(0, min(len(toc_entries) - 1,
+                                       toc_index - event.y))
+                toc_scroll = max(0, min(toc_index, len(toc_entries) - 11))
             if event.type != pg.KEYDOWN:
                 continue
             key = event.key
             if mode == 'reader':
                 if key in (pg.K_ESCAPE, pg.K_LEFT):
-                    mode = 'action' if group >= 2 else 'items'
+                    mode = reader_back
                 elif key in (pg.K_DOWN, pg.K_PAGEDOWN):
                     scroll = min(reader_limit(), scroll + (reader_page_size if key == pg.K_PAGEDOWN else 1))
                 elif key in (pg.K_UP, pg.K_PAGEUP):
@@ -271,6 +300,20 @@ def main():
                     scroll = 0
                 elif key == pg.K_END:
                     scroll = reader_limit()
+            elif mode == 'toc':
+                if key in (pg.K_ESCAPE, pg.K_LEFT):
+                    mode = 'items'
+                elif key in (pg.K_UP, pg.K_DOWN):
+                    toc_index = wrapped_index(
+                        toc_index, 1 if key == pg.K_DOWN else -1,
+                        len(toc_entries))
+                    toc_scroll = min(max(0, toc_index - 10),
+                                     max(0, len(toc_entries) - 11))
+                elif key in (pg.K_RETURN, pg.K_RIGHT):
+                    target = toc_entries[toc_index]
+                    lines = [target, ''] + document_lines(sections[target])
+                    reader_back = 'toc'
+                    mode, scroll, horizontal = 'reader', 0, 0
             elif mode == 'exit':
                 if key in (pg.K_RETURN, pg.K_y):
                     running = False
@@ -376,10 +419,30 @@ def main():
                         pg.draw.rect(screen, COLORS['accent_alt'], (rect.x, rect.y, 4, rect.height), border_radius=2)
                     text(value, rect.x + 18, rect.y + 11, COLORS['white'], typeface)
         elif mode == 'reader':
-            text(lines[0] if lines else 'Документ', 306, 126, COLORS['text'], heading)
+            text((lines[0] if lines else 'Документ')[:58], 306, 130,
+                 COLORS['text'], document_heading)
             text('PgUp/PgDn или колёсико — прокрутка', 308, 166, COLORS['muted'], small)
             for index, value in enumerate(lines[1 + scroll:1 + scroll + reader_page_size]):
-                text(value[horizontal:horizontal + 86], 308, 196 + index * 20, COLORS['text'], small)
+                shown = pretty_formula(value)[horizontal:horizontal + 86]
+                y = 196 + index * 20
+                if is_formula(value):
+                    rounded(pg, screen, pg.Rect(302, y - 2, 620, 19),
+                            COLORS['background_alt'], 5)
+                    text(shown, 316, y, COLORS['accent_alt'], formula)
+                else:
+                    text(shown, 308, y, COLORS['text'], small)
+        elif mode == 'toc':
+            text('Оглавление', 306, 126, COLORS['text'], heading)
+            text('Выберите статью: ↑ ↓, Enter или клик мышью',
+                 308, 162, COLORS['muted'], small)
+            for offset, value in enumerate(toc_entries[toc_scroll:toc_scroll + 11]):
+                index = toc_scroll + offset
+                rect = pg.Rect(306, 184 + offset * 30, 600, 26)
+                active = index == toc_index
+                rounded(pg, screen, rect,
+                        COLORS['accent'] if active else COLORS['background_alt'], 6)
+                text(f'{index + 1:>2}. {value}'[:72], rect.x + 10, rect.y + 5,
+                     COLORS['white'] if active else COLORS['text'], small)
         elif mode == 'exit':
             text('Завершить работу?', 306, 140, COLORS['text'], heading)
             text('Все открытые окна будут закрыты.', 308, 190, COLORS['muted'], typeface)
@@ -389,7 +452,7 @@ def main():
             text('Esc / N — Нет', 616, 277, COLORS['text'], typeface)
         rounded(pg, screen, pg.Rect(24, 562, 912, 24), COLORS['panel'], 8)
         footer = ('↑ ↓ разделы    Enter / → открыть    Esc выход' if mode == 'main' else
-                  '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action') else
+                  '↑ ↓ выбрать    Enter / → открыть    Esc / ← назад' if mode in ('items', 'action', 'toc') else
                   '↑ ↓ прокрутка    PgUp/PgDn страница    Esc / ← назад')
         text(footer + '    мышь поддерживается', 38, 566, COLORS['muted'], small)
         present_scaled(pg, screen, window)

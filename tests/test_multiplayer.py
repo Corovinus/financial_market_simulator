@@ -4,13 +4,44 @@ import unittest
 
 from market.config import read_par
 from market.generator import generate_scenario
-from market.network import GameSession, LanClient, LanServer
+from market.network import GameSession, LanClient, LanServer, discover_games
+from modules.network_launcher import teacher_scenario
 
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class MultiplayerTests(unittest.TestCase):
+    def test_teacher_settings_change_pacing_without_changing_payments(self):
+        settings = {'scenario': 'B02', 'duration': 90, 'reaction': 4,
+                    'queue': False, 'hints': False}
+        scenario = teacher_scenario(settings)
+        original = read_par(ROOT / 'data/original/B02.PAR')
+        self.assertEqual((scenario.duration_ticks, scenario.reaction_ticks),
+                         (900, 40))
+        self.assertEqual(scenario.payments, original.payments)
+        self.assertFalse(scenario.queue)
+        self.assertFalse(scenario.hints)
+
+    def test_open_room_is_discovered_on_local_network(self):
+        scenario = read_par(ROOT / 'data/original/B01.PAR')
+        server = LanServer(scenario, host='127.0.0.1', port=0,
+                           human_slots=5, bots=2, room_name='Семинар 7').start()
+        try:
+            rooms = discover_games(timeout=1, targets=('127.0.0.1',))
+            room = next(value for value in rooms
+                        if value['port'] == server.address[1])
+            self.assertEqual(room['name'], 'Семинар 7')
+            self.assertEqual((room['players'], room['capacity'], room['bots']),
+                             (0, 5, 2))
+            server.session.join('Участник')
+            server.session.start_or_continue()
+            rooms = discover_games(timeout=.3, targets=('127.0.0.1',))
+            self.assertFalse(any(value['port'] == server.address[1]
+                                 for value in rooms))
+        finally:
+            server.stop()
+
     def test_smart_scenario_is_reproducible_and_valid(self):
         first = generate_scenario(12345, 'normal')
         second = generate_scenario(12345, 'normal')
@@ -63,7 +94,8 @@ class MultiplayerTests(unittest.TestCase):
     def test_tcp_server_keeps_clients_synchronized_after_rejected_order(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
         server = LanServer(scenario, host='127.0.0.1', port=0,
-                           human_slots=2, bots=0, seed=1).start()
+                           human_slots=2, bots=0, seed=1,
+                           discovery=False).start()
         port = server.address[1]
         admin = first = second = None
         try:
