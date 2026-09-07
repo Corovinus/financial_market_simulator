@@ -4,6 +4,7 @@ import tempfile
 import unittest
 
 from market.config import Goal, Scenario, read_par, parse_offer
+from market.classic import CLASSIC_LABELS, classic_level
 from market.goals import evaluate_goals
 from market.calculations import bond_value, settle, future_capital
 from market.rng import OriginalRNG
@@ -28,6 +29,51 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class OriginalCases(unittest.TestCase):
+    def test_classic_stock_option_and_efficiency_markets(self):
+        levels = {label: classic_level(label, seed=7)
+                  for label in CLASSIC_LABELS}
+        self.assertEqual(len(levels), 9)
+        self.assertTrue(all(level.scenario.periods >= 1
+                            for level in levels.values()))
+
+        ca1 = Market(levels['Case CA1'].scenario)
+        ca1.start_period(0)
+        ca1.portfolios[0].positions[0] = 0
+        ca1.submit(1, 0, 'bid', 10, 1)
+        with self.assertRaisesRegex(OrderError, 'Короткая позиция'):
+            ca1.take(0, 0, 'sell', 1)
+        ca1_robot = Market(levels['Case CA1'].scenario)
+        ca1_robot.start_period(0)
+        ca1_robot.portfolios[1].positions[0] = 0
+        ca1_robot.submit(0, 0, 'bid', 10, 1)
+        with self.assertRaisesRegex(OrderError, 'Короткая позиция'):
+            ca1_robot.take(1, 0, 'sell', 1)
+
+        ca3 = Market(levels['Case CA3'].scenario)
+        ca3.start_period(0)
+        ca3.portfolios[0].positions[0] = 0
+        ca3.submit(1, 0, 'bid', 10, 1)
+        ca3.take(0, 0, 'sell', 1)
+        self.assertEqual(ca3.portfolios[0].positions[0], -1)
+
+        ca2 = Market(levels['Case CA2'].scenario)
+        ca2.start_period(0)
+        self.assertEqual(ca2.book.best(0, 'ask').price, 28)
+        with self.assertRaisesRegex(OrderError, 'задаётся извне'):
+            ca2.submit(0, 0, 'bid', 27, 1)
+        ca2.take(0, 0, 'buy', 99)
+        self.assertEqual(ca2.book.best(0, 'ask').quantity, 99)
+
+        op3 = Market(levels['Case OP3'].scenario)
+        op3.start_period(0)
+        with self.assertRaisesRegex(OrderError, 'запрещена'):
+            op3.submit(0, 2, 'bid', 10, 1)
+        self.assertEqual(levels['Case RE1'].scenario.periods, 2)
+        self.assertEqual(levels['Case RE3'].scenario.names[-2:],
+                         ('Put/30', 'Call/30'))
+        re2 = levels['Case RE2'].scenario
+        self.assertEqual(re2.payments[1][0] + re2.payments[2][0], 30)
+
     def test_interface_preferences_are_validated_and_themes_apply(self):
         values = normalize_preferences({
             'scale': 2, 'font_scale': 1.2, 'theme': 'light',

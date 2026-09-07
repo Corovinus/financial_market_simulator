@@ -57,15 +57,21 @@ class Scenario:
     robot_style: str = 'balanced'
     robot_value_spread: float = 0.2
     robot_max_quantity: int = 99
+    short_sales: bool = True
+    tradable: tuple[bool, ...] = ()
+    fixed_prices: tuple[tuple[int | None, ...], ...] = ()
 
     def __post_init__(self):
         """Reject malformed built-in, generated and user-authored levels early."""
         tuple_fields = ('rates', 'names', 'payments', 'positions',
-                        'score_parameters', 'goals')
+                        'score_parameters', 'goals', 'tradable',
+                        'fixed_prices')
         for field in tuple_fields:
             object.__setattr__(self, field, tuple(getattr(self, field)))
         object.__setattr__(self, 'payments',
                            tuple(tuple(row) for row in self.payments))
+        object.__setattr__(self, 'fixed_prices',
+                           tuple(tuple(row) for row in self.fixed_prices))
         object.__setattr__(self, 'goals', tuple(
             goal if isinstance(goal, Goal) else Goal(**goal)
             for goal in self.goals))
@@ -90,6 +96,20 @@ class Scenario:
         if (len(self.positions) != len(self.names) or
                 any(type(value) is not int for value in self.positions)):
             raise ValueError('Начальные позиции должны быть целыми и совпадать с бумагами')
+        if not self.tradable:
+            object.__setattr__(self, 'tradable', (True,) * len(self.names))
+        if (len(self.tradable) != len(self.names) or
+                any(type(value) is not bool for value in self.tradable)):
+            raise ValueError('Доступность торговли должна быть задана для каждой бумаги')
+        if not self.fixed_prices:
+            object.__setattr__(self, 'fixed_prices',
+                               ((None,) * self.periods,) * len(self.names))
+        if (len(self.fixed_prices) != len(self.names) or
+                any(len(row) != self.periods or any(
+                    value is not None and
+                    (type(value) is not int or not 1 <= value <= 999)
+                    for value in row) for row in self.fixed_prices)):
+            raise ValueError('Фиксированные цены должны совпадать с бумагами и периодами')
         if (not isinstance(self.cash, (int, float)) or
                 not math.isfinite(self.cash)):
             raise ValueError('Начальные деньги должны быть конечным числом')
@@ -116,8 +136,12 @@ class Scenario:
         if (type(self.robot_max_quantity) is not int or
                 not 1 <= self.robot_max_quantity <= 99):
             raise ValueError('Размер заявки робота должен быть от 1 до 99')
-        if type(self.queue) is not bool or type(self.hints) is not bool:
+        if (type(self.queue) is not bool or type(self.hints) is not bool or
+                type(self.short_sales) is not bool):
             raise ValueError('Очередь и подсказки должны быть True или False')
+        if (any(any(value is not None for value in row)
+                for row in self.fixed_prices) and self.robots < 1):
+            raise ValueError('Для фиксированной цены нужен хотя бы один маркет-мейкер')
         if any(goal.kind == 'position' and
                goal.instrument >= len(self.names) for goal in self.goals):
             raise ValueError('Цель ссылается на неизвестную бумагу')

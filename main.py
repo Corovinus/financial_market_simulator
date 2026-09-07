@@ -356,7 +356,8 @@ def main():
         if mode == 'main':
             for index, rect in enumerate(item_rects()[:6]):
                 if rect.collidepoint(position):
-                    row, mode = index, 'items'
+                    row = index
+                    open_selected()
                     return
             if open_button.collidepoint(position):
                 enter_section()
@@ -369,6 +370,7 @@ def main():
                     row = index
                     LOGGER.info('Item selected via mouse: group=%s row=%s label=%s',
                                 GROUPS[group][0], row, GROUPS[group][1][row][0])
+                    open_selected()
                     return
             if open_button.collidepoint(position):
                 open_selected()
@@ -586,7 +588,8 @@ def main():
                          COLORS['white'], typeface)
             elif mode == 'items':
                 options = [item[0] for item in GROUPS[group][1]]
-                text('↑ ↓ — выбрать материал   ← — назад', 308, 166, COLORS['muted'], small)
+                text('↑ ↓ — выбрать   Enter или клик — открыть   ← — назад',
+                     308, 166, COLORS['muted'], small)
                 visible = options[item_scroll:item_scroll + item_page_size]
                 for offset, (value, rect) in enumerate(zip(visible, item_rects())):
                     index = item_scroll + offset

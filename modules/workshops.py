@@ -165,6 +165,9 @@ def _calculate(label: str, fields: list[Field]) -> list[str]:
 def run_module(label: str, speed: float = 1.0, scale: float = 1.0,
                close_display: bool = True):
     """Run one of the recovered teaching tabs and return its last result."""
+    from market.classic import CLASSIC_LABELS, run_classic_session
+    if label in CLASSIC_LABELS:
+        return run_classic_session(label, speed, scale, close_display)
     title, purpose, fields = _spec(label)
     if not isinstance(speed, (int, float)) or speed <= 0:
         raise ValueError("Скорость должна быть положительной")

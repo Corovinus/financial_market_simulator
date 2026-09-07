@@ -1,6 +1,13 @@
 """Shared DOS text rendering helpers and logical-resolution scaling."""
 from __future__ import annotations
 
+import time
+
+
+_held_arrows = {}
+_REPEAT_DELAY = 0.35
+_REPEAT_INTERVAL = 0.065
+
 
 def open_scaled_display(pygame, size, scale, caption):
     """Return a fixed-size pixel canvas and a resizable scaled window."""
@@ -17,6 +24,8 @@ def open_scaled_display(pygame, size, scale, caption):
     window = pygame.display.set_mode((0, 0) if preferences['fullscreen'] else window_size,
                                      flags)
     pygame.display.set_caption(caption)
+    pygame.key.set_repeat()
+    _held_arrows.clear()
     return pygame.Surface(base_size), window
 
 
@@ -53,6 +62,12 @@ def handle_window_event(pygame, event, canvas, window):
         set_preferences(window_size=[width, height],
                         scale=max(0.5, min(5.0, scale)))
         return pygame.display.get_surface() or window, False
+    arrow_keys = (pygame.K_LEFT, pygame.K_RIGHT, pygame.K_UP, pygame.K_DOWN)
+    if event.type == pygame.KEYUP and event.key in arrow_keys:
+        _held_arrows.pop(event.key, None)
+    elif (event.type == pygame.KEYDOWN and event.key in arrow_keys and
+          not getattr(event, 'navigation_repeat', False)):
+        _held_arrows[event.key] = time.monotonic() + _REPEAT_DELAY
     if event.type != pygame.KEYDOWN:
         return window, False
     if event.key == pygame.K_F11:
@@ -68,6 +83,13 @@ def handle_window_event(pygame, event, canvas, window):
 
 def present_scaled(pygame, canvas, window):
     """Scale the DOS canvas to the current (possibly resized) window."""
+    now = time.monotonic()
+    for key, deadline in tuple(_held_arrows.items()):
+        if now >= deadline:
+            pygame.event.post(pygame.event.Event(
+                pygame.KEYDOWN, key=key, mod=pygame.key.get_mods(),
+                unicode='', navigation_repeat=True))
+            _held_arrows[key] = now + _REPEAT_INTERVAL
     window = pygame.display.get_surface() or window
     target_width, target_height = window.get_size()
     base_width, base_height = canvas.get_size()

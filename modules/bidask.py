@@ -28,7 +28,10 @@ LOGGER = logging.getLogger('fast.bidask')
 
 
 def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
-                scale: float = 1.0, close_display: bool = True):
+                scale: float = 1.0, close_display: bool = True,
+                session_title: str = 'Торговая сессия',
+                info_lines: tuple[str, ...] = (),
+                result_lines: tuple[str, ...] = ()):
     """Run one B01/B02 attempt and return the final capital.
 
     ``speed`` scales the original decisecond clock.  The default therefore
@@ -92,6 +95,16 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         nonlocal status, status_until
         status, status_until = value, time.monotonic() + seconds
 
+    def can_start(action):
+        if not scenario.tradable[selected_instrument]:
+            message('Торговля этой бумагой в данном режиме запрещена')
+            return False
+        if (action == 'quote' and
+                scenario.fixed_prices[selected_instrument][period] is not None):
+            message('Цена задаётся извне: используйте B или S')
+            return False
+        return True
+
     def quote_text(quote):
         return '' if quote is None else f'{quote.price}.{quote.quantity:02d}'
 
@@ -147,7 +160,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, COLORS['decor_top'], (920, 0), 250)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
-        write('Торговая сессия', 48, 30, COLORS['accent'], title_font)
+        write(session_title[:34], 48, 30, COLORS['accent'], title_font)
         if scenario.goals:
             write(f'F4 · цели ({len(scenario.goals)})', 350, 38,
                   COLORS['accent_alt'], small_font)
@@ -173,12 +186,17 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             bid = market.book.best(index, 'bid')
             ask = market.book.best(index, 'ask')
             for side, quote, x, side_color in (('bid', bid, 204, COLORS['buy']), ('ask', ask, 372, COLORS['sell'])):
-                selected = index == selected_instrument and side == selected_side
+                available = scenario.tradable[index]
+                selected = (available and index == selected_instrument and
+                            side == selected_side)
                 field = pg.Rect(x, y, 150, 42)
                 rounded(pg, screen, field, COLORS['background_alt'], 9)
                 rounded(pg, screen, field, COLORS['accent'] if selected else COLORS['border'], 9, 2 if selected else 1)
-                write(quote_text(quote) or '—', x + 14, y + 9,
-                      COLORS['white'] if quote and quote.owner == 0 else side_color, body_font)
+                shown = quote_text(quote) or ('закрыт' if not available else '—')
+                write(shown, x + 14, y + 9,
+                      COLORS['muted'] if not available else
+                      COLORS['white'] if quote and quote.owner == 0 else
+                      side_color, small_font if not available else body_font)
             write(str(market.portfolios[0].positions[index]), 536, y + 12, COLORS['text'], body_font)
             if scenario.hints and show_hints:
                 rounded(pg, screen, pg.Rect(536, y + 44, 84, 24), COLORS['accent'], 6)
@@ -192,11 +210,20 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         write('Участники', 676, 252, COLORS['muted'], small_font)
         write(str(scenario.robots + 1), 820, 248, COLORS['text'], body_font)
         card(pg, screen, pg.Rect(654, 300, 282, 168), COLORS['panel'], COLORS['border'])
-        write('Последние сделки', 676, 320, COLORS['text'], body_font)
-        history = market.history_for(selected_instrument, 'ask') + market.history_for(selected_instrument, 'bid')
-        for n, trade in enumerate(history[:3]):
-            write(f'{trade.price}.{trade.quantity:02d}  ID {trade.buyer + 1}/{trade.seller + 1}',
-                  676, 366 + n * 28, COLORS['accent_alt'], small_font)
+        details = result_lines if result_screen and result_lines else info_lines
+        if details:
+            write('Условия рынка', 676, 320, COLORS['text'], body_font)
+            for n, line in enumerate(details[:4]):
+                write(line[:34], 676, 360 + n * 24,
+                      COLORS['accent_alt'] if n == 0 else COLORS['muted'],
+                      small_font)
+        else:
+            write('Последние сделки', 676, 320, COLORS['text'], body_font)
+            history = (market.history_for(selected_instrument, 'ask') +
+                       market.history_for(selected_instrument, 'bid'))
+            for n, trade in enumerate(history[:3]):
+                write(f'{trade.price}.{trade.quantity:02d}  ID {trade.buyer + 1}/{trade.seller + 1}',
+                      676, 366 + n * 28, COLORS['accent_alt'], small_font)
         if result_screen:
             rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['panel_alt'], 16)
             rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['accent'], 2, 2)
@@ -321,9 +348,11 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                         LOGGER.info('Quote selected via mouse: instrument=%s side=%s',
                                     selected_instrument, selected_side)
                     elif buy_button.collidepoint(position):
-                        selected_side, input_mode, input_text = 'ask', 'buy', ''
+                        if can_start('buy'):
+                            selected_side, input_mode, input_text = 'ask', 'buy', ''
                     elif sell_button.collidepoint(position):
-                        selected_side, input_mode, input_text = 'bid', 'sell', ''
+                        if can_start('sell'):
+                            selected_side, input_mode, input_text = 'bid', 'sell', ''
                 continue
             if event.type != pg.KEYDOWN:
                 continue
@@ -458,9 +487,11 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             elif key == pg.K_RIGHT:
                 selected_side = 'ask'
             elif key == pg.K_b:
-                selected_side, input_mode, input_text = 'ask', 'buy', ''
+                if can_start('buy'):
+                    selected_side, input_mode, input_text = 'ask', 'buy', ''
             elif key == pg.K_s:
-                selected_side, input_mode, input_text = 'bid', 'sell', ''
+                if can_start('sell'):
+                    selected_side, input_mode, input_text = 'bid', 'sell', ''
             elif key == pg.K_F9 and scenario.hints:
                 show_hints = not show_hints
                 message('F9 — цены будущих выплат' if show_hints else 'F9 — цены скрыты')
@@ -471,7 +502,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 speed = max(0.125, float(speed) / 2)
                 message(f'Скорость: {speed:g}')
             elif event.unicode and event.unicode in '0123456789.':
-                input_mode, input_text = 'quote', event.unicode
+                if can_start('quote'):
+                    input_mode, input_text = 'quote', event.unicode
         draw()
         present_scaled(pg, screen, window)
     final_capital = market.portfolios[0].cash

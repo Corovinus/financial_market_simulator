@@ -49,11 +49,19 @@ class Market:
                 raise ValueError('Неверный период')
             self.period = period
         self.book.reset()
+        for instrument, prices in enumerate(self.scenario.fixed_prices):
+            price = prices[self.period]
+            if price is not None and self.scenario.tradable[instrument]:
+                self.book.submit(1, instrument, 'bid', price, 99)
+                self.book.submit(1, instrument, 'ask', price, 99)
         self.started = True
         self._record_replay('start_period')
 
     def submit(self, actor, instrument, side, price, quantity):
         self._actor(actor)
+        self._instrument_available(instrument)
+        if self.scenario.fixed_prices[instrument][self.period] is not None:
+            raise OrderError('На этом рынке цена задаётся извне')
         quote = self.book.submit(actor, instrument, side, price, quantity)
         self._record_replay(side, actor, instrument, quote.price,
                             quote.quantity)
@@ -61,6 +69,17 @@ class Market:
 
     def take(self, actor, instrument, side, quantity):
         self._actor(actor)
+        self._instrument_available(instrument)
+        if side not in ('buy', 'sell'):
+            raise OrderError('Сторона должна быть buy или sell')
+        column = 'ask' if side == 'buy' else 'bid'
+        quote = self.book.best(instrument, column)
+        seller = quote.owner if side == 'buy' and quote is not None else actor
+        fixed = self.scenario.fixed_prices[instrument][self.period]
+        if (quote is not None and not self.scenario.short_sales and
+                not (fixed is not None and seller == 1) and
+                self.portfolios[seller].positions[instrument] < quantity):
+            raise OrderError('Короткая позиция на этом рынке запрещена')
         trade = self.book.take(actor, instrument, side, quantity)
         buyer, seller = trade.buyer, trade.seller
         value = trade.price * trade.quantity
@@ -68,9 +87,18 @@ class Market:
         self.portfolios[buyer].positions[instrument] = _word(self.portfolios[buyer].positions[instrument] + trade.quantity)
         self.portfolios[seller].cash += value
         self.portfolios[seller].positions[instrument] = _word(self.portfolios[seller].positions[instrument] - trade.quantity)
+        if fixed is not None and self.book.best(instrument, column) is None:
+            self.book.submit(1, instrument, column, fixed, 99)
         self._record_replay(side, actor, instrument, trade.price,
                             trade.quantity, trade.buyer, trade.seller)
         return trade
+
+    def _instrument_available(self, instrument):
+        if (type(instrument) is not int or
+                not 0 <= instrument < len(self.scenario.names)):
+            raise OrderError('Неверный номер бумаги')
+        if not self.scenario.tradable[instrument]:
+            raise OrderError('Торговля этой бумагой в данном режиме запрещена')
 
     def quotes(self, instrument, side):
         return self.book.quotes(instrument, side)
