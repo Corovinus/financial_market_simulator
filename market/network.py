@@ -1,5 +1,5 @@
 """Authoritative local-network session and a small JSON-over-TCP protocol."""
-from dataclasses import replace
+from dataclasses import asdict, replace
 import ipaddress
 import json
 import logging
@@ -46,20 +46,26 @@ def parse_endpoint(value, default_port=DEFAULT_PORT):
 class GameSession:
     """One synchronized market shared by player and administrator clients."""
 
-    def __init__(self, scenario: Scenario, human_slots=4, bots=4, seed=0):
+    def __init__(self, scenario: Scenario, human_slots=4, bots=4, seed=0,
+                 case_hud=None):
         if not isinstance(scenario, Scenario):
             raise TypeError('Ожидался Scenario')
         if type(human_slots) is not int or not 1 <= human_slots <= 16:
             raise ValueError('Число мест игроков должно быть от 1 до 16')
         if type(bots) is not int or not 0 <= bots <= 32:
             raise ValueError('Число роботов должно быть от 0 до 32')
-        total = human_slots + bots
+        has_fixed_prices = any(any(price is not None for price in row)
+                               for row in scenario.fixed_prices)
+        market_makers = 1 if has_fixed_prices else 0
+        total = human_slots + bots + market_makers
         self.scenario = replace(scenario, robots=total - 1,
                                 wolves=min(scenario.wolves, bots))
         self.human_slots = human_slots
-        self.bot_count = bots
+        self.bot_count = bots + market_makers
         self.seed = seed
-        self.market = Market(self.scenario)
+        self.case_hud = case_hud
+        fixed_owner = total - 1 if market_makers else 1
+        self.market = Market(self.scenario, fixed_owner)
         self.market.start_period(0)
         self.period = 0
         self.remaining = float(self.scenario.duration_ticks)
@@ -238,20 +244,42 @@ class GameSession:
                           if actor is not None else {})
                 scores = ({str(actor): scores[str(actor)]}
                           if actor is not None else {})
+            case_hud = asdict(self.case_hud) if self.case_hud else None
+            if (case_hud and not admin and actor is not None and
+                    case_hud['label'].startswith('Case RE')):
+                private = case_hud['private_information']
+                case_hud['private_information'] = (
+                    private[actor % len(private)],) if private else ()
+            hidden_case = bool(case_hud and case_hud['label'].startswith(
+                ('Case CA', 'Case OP', 'Case RE')))
+            payments = self.scenario.payments
+            fair_values = self._fair_values
+            visible_seed = self.seed
+            visible_hints = self.scenario.hints
+            if hidden_case and not admin:
+                payments = tuple((0,) * self.scenario.periods
+                                 for _ in self.scenario.names)
+                fair_values = ()
+                visible_seed = None
+                visible_hints = False
+                if case_hud['label'].startswith('Case OP'):
+                    case_hud['option_path'] = case_hud['option_path'][
+                        :self.period + 1]
             return {
                 'phase': self.phase, 'period': self.period,
                 'periods': self.scenario.periods,
                 'remaining': self.remaining, 'book': book,
                 'human_slots': self.human_slots, 'bots': self.bot_count,
-                'seed': self.seed,
+                'seed': visible_seed,
                 'players': names, 'connected': tuple(sorted(self.connected)),
                 'portfolios': portfolios, 'actions': tuple(self.actions[-30:]),
                 'result': result, 'scores': scores,
                 'rates': self.scenario.rates,
-                'payments': self.scenario.payments,
-                'hints': self.scenario.hints,
+                'payments': payments,
+                'hints': visible_hints,
                 'goal_count': len(self.scenario.goals),
-                'fair_values': self._fair_values,
+                'fair_values': fair_values,
+                'case_hud': case_hud,
             }
 
     def replay_frame(self, index):
@@ -402,8 +430,9 @@ class _ThreadingServer(socketserver.ThreadingTCPServer):
 class LanServer:
     def __init__(self, scenario, host='0.0.0.0', port=DEFAULT_PORT,
                  human_slots=4, bots=4, seed=0, admin_key=None,
-                 room_name='Игра FAST', discovery=True):
-        self.session = GameSession(scenario, human_slots, bots, seed)
+                 room_name='Игра FAST', discovery=True, case_hud=None):
+        self.session = GameSession(scenario, human_slots, bots, seed,
+                                   case_hud)
         self.admin_key = admin_key or secrets.token_urlsafe(6)
         self.room_name = str(room_name).strip()[:40] or 'Игра FAST'
         self.discovery = discovery
@@ -472,6 +501,8 @@ class LanServer:
                     'players': len(state['connected']),
                     'capacity': state['human_slots'], 'bots': state['bots'],
                     'instruments': len(state['book']),
+                    'case': (state['case_hud']['label']
+                             if state.get('case_hud') else 'Случайный'),
                 }
                 self._discovery_socket.sendto(
                     json.dumps(answer, ensure_ascii=False).encode('utf-8'),

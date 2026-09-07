@@ -24,10 +24,11 @@ class Market:
     row, as the original BIDASK initialization does. ``RobotController`` calls
     the same ``submit``/``take`` methods for autonomous participants.
     """
-    def __init__(self, scenario: Scenario):
+    def __init__(self, scenario: Scenario, fixed_owner=1):
         if not isinstance(scenario, Scenario):
             raise TypeError('Market expects a Scenario')
         self.scenario = scenario
+        self.fixed_owner = fixed_owner
         self.portfolios = [Portfolio(scenario.cash, list(scenario.positions))
                            for _ in range(scenario.robots + 1)]
         self.book = OrderBook(len(scenario.names), scenario.queue)
@@ -55,8 +56,8 @@ class Market:
         for instrument, prices in enumerate(self.scenario.fixed_prices):
             price = prices[self.period]
             if price is not None and self.scenario.tradable[instrument]:
-                self.book.submit(1, instrument, 'bid', price, 99)
-                self.book.submit(1, instrument, 'ask', price, 99)
+                self.book.submit(self.fixed_owner, instrument, 'bid', price, 99)
+                self.book.submit(self.fixed_owner, instrument, 'ask', price, 99)
         self.started = True
         self._record_replay('start_period')
 
@@ -80,7 +81,7 @@ class Market:
         seller = quote.owner if side == 'buy' and quote is not None else actor
         fixed = self.scenario.fixed_prices[instrument][self.period]
         if (quote is not None and not self.scenario.short_sales and
-                not (fixed is not None and seller == 1) and
+                not (fixed is not None and seller == self.fixed_owner) and
                 self.portfolios[seller].positions[instrument] < quantity):
             raise OrderError('Короткая позиция на этом рынке запрещена')
         trade = self.book.take(actor, instrument, side, quantity)

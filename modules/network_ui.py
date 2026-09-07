@@ -6,6 +6,7 @@ import time
 from market.config import parse_offer
 from market.report import default_report_folder, export_report
 from .display import handle_window_event, open_scaled_display, present_scaled
+from .case_panels import draw_network_case_panel
 from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
@@ -52,6 +53,8 @@ def run_network_client(client, role='player', scale=1.0,
     goals_actor = client.actor or 0
     last_goal_refresh = 0.0
     confirm_exit = False
+    confirm_choice = 1
+    show_case_panel = bool(state.get('case_hud')) and not is_admin
     mouse = None
     last_action = (tuple(sorted(state['actions'][-1].items()))
                    if state.get('actions') else None)
@@ -118,7 +121,8 @@ def run_network_client(client, role='player', scale=1.0,
             if confirm_exit:
                 draw_confirmation(pg, screen, small, title,
                                   'Выйти из активной игры?',
-                                  'Подключение к комнате будет закрыто.')
+                                  'Подключение к комнате будет закрыто.',
+                                  confirm_choice)
             return
         if report_data is not None:
             draw_report(pg, screen, report_data, report_instrument,
@@ -128,7 +132,8 @@ def run_network_client(client, role='player', scale=1.0,
             if confirm_exit:
                 draw_confirmation(pg, screen, small, title,
                                   'Выйти из активной игры?',
-                                  'Подключение к комнате будет закрыто.')
+                                  'Подключение к комнате будет закрыто.',
+                                  confirm_choice)
             return
         if replay_data is not None:
             names = tuple(row['name'] for row in state['book'])
@@ -140,7 +145,8 @@ def run_network_client(client, role='player', scale=1.0,
             if confirm_exit:
                 draw_confirmation(pg, screen, small, title,
                                   'Выйти из активной игры?',
-                                  'Подключение к комнате будет закрыто.')
+                                  'Подключение к комнате будет закрыто.',
+                                  confirm_choice)
             return
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, COLORS['decor_top'], (900, 0), 260)
@@ -152,7 +158,11 @@ def run_network_client(client, role='player', scale=1.0,
         write(phase_names.get(state['phase'], state['phase']), 700, 34,
               COLORS['warning'], body)
         write(room_label[:52], 48, 78, COLORS['muted'], small)
-        write(f'Seed {state["seed"]}', 570, 42, COLORS['muted'], small)
+        if state.get('seed') is not None:
+            write(f'Seed {state["seed"]}', 570, 42, COLORS['muted'], small)
+        if state.get('case_hud'):
+            write(state['case_hud']['label'], 760, 78,
+                  COLORS['accent_alt'], small)
         if state.get('goal_count'):
             write(f'F4 · цели ({state["goal_count"]})', 390, 42,
                   COLORS['accent_alt'], small)
@@ -225,29 +235,40 @@ def run_network_client(client, role='player', scale=1.0,
                     else:
                         write('—', x + 12, y + 5, COLORS['muted'], small)
 
-            card(pg, screen, pg.Rect(636, 96, 296, 386),
-                 COLORS['panel'], COLORS['border'])
             actor_ids = sorted(int(value) for value in state['players'])
             if observed not in actor_ids:
                 observed = actor_ids[0] if actor_ids else 0
-            write('Наблюдение', 658, 116, COLORS['text'], body)
-            write(f'ID {observed + 1} · {owner_name(state, observed)}'[:30],
-                  658, 150, COLORS['accent_alt'], small)
             portfolio = state['portfolios'].get(str(observed))
             if portfolio:
-                write(f'Деньги: {portfolio["cash"]:.2f}', 658, 184,
-                      COLORS['text'], body)
-                for index, quantity in enumerate(portfolio['positions'][:6]):
-                    write(f'{state["book"][index]["name"][:13]}: {quantity}',
-                          658, 220 + index * 24, COLORS['muted'], small)
-            write('Последние действия', 658, 372, COLORS['text'], small)
-            actions = [event for event in state['actions']
-                       if event['kind'] in ('bid', 'ask', 'buy', 'sell')][-3:]
-            for row, event in enumerate(reversed(actions)):
-                actor = event['actor']
-                write(f'ID {actor + 1} {event["kind"]} '
-                      f'{event["price"]}.{event["quantity"]}',
-                      658, 398 + row * 22, COLORS['muted'], small)
+                holding = portfolio['positions'][selected]
+                write(f'Деньги {portfolio["cash"]:.2f}  ·  '
+                      f'{state["book"][selected]["name"]}: {holding}',
+                      48, 452, COLORS['accent_alt'], small)
+            if state.get('case_hud') and show_case_panel:
+                draw_network_case_panel(
+                    pg, screen, pg.Rect(636, 96, 296, 386),
+                    state['case_hud'], state, selected, observed,
+                    (body, small, title), is_admin)
+            else:
+                card(pg, screen, pg.Rect(636, 96, 296, 386),
+                     COLORS['panel'], COLORS['border'])
+                write('Наблюдение', 658, 116, COLORS['text'], body)
+                write(f'ID {observed + 1} · {owner_name(state, observed)}'[:30],
+                      658, 150, COLORS['accent_alt'], small)
+                if portfolio:
+                    write(f'Деньги: {portfolio["cash"]:.2f}', 658, 184,
+                          COLORS['text'], body)
+                    for index, quantity in enumerate(portfolio['positions'][:6]):
+                        write(f'{state["book"][index]["name"][:13]}: {quantity}',
+                              658, 220 + index * 24, COLORS['muted'], small)
+                write('Последние действия', 658, 372, COLORS['text'], small)
+                actions = [event for event in state['actions']
+                           if event['kind'] in ('bid', 'ask', 'buy', 'sell')][-3:]
+                for row, event in enumerate(reversed(actions)):
+                    actor = event['actor']
+                    write(f'ID {actor + 1} {event["kind"]} '
+                          f'{event["price"]}.{event["quantity"]}',
+                          658, 398 + row * 22, COLORS['muted'], small)
 
             if state['phase'] in ('result', 'finished'):
                 rounded(pg, screen, pg.Rect(170, 214, 520, 170),
@@ -284,6 +305,8 @@ def run_network_client(client, role='player', scale=1.0,
             write(status[:105], 42, 548, COLORS['warning'], small)
         elif state['phase'] == 'running':
             help_text = '↑↓ инструмент  ←→ Bid/Ask  цифра — заявка  B/S — сделка  F9 — оценка'
+            if state.get('case_hud'):
+                help_text += '  H — HUD/портфель'
             if is_admin:
                 help_text += '  Space — пауза  E — итог  Tab — участник'
             write(help_text, 42, 548, COLORS['muted'], small)
@@ -299,7 +322,8 @@ def run_network_client(client, role='player', scale=1.0,
         if confirm_exit:
             draw_confirmation(pg, screen, small, title,
                               'Выйти из активной игры?',
-                              'Подключение к комнате будет закрыто.')
+                               'Подключение к комнате будет закрыто.',
+                               confirm_choice)
 
     while running:
         while True:
@@ -350,6 +374,7 @@ def run_network_client(client, role='player', scale=1.0,
             if event.type == pg.QUIT:
                 if state.get('phase') in ('running', 'paused'):
                     confirm_exit = True
+                    confirm_choice = 1
                 else:
                     running = False
                 continue
@@ -360,7 +385,7 @@ def run_network_client(client, role='player', scale=1.0,
                 if confirm_exit and position:
                     yes, no = draw_confirmation(
                         pg, screen, small, title, 'Выйти из активной игры?',
-                        'Подключение к комнате будет закрыто.')
+                        'Подключение к комнате будет закрыто.', confirm_choice)
                     if yes.collidepoint(position):
                         running = False
                     elif no.collidepoint(position):
@@ -374,6 +399,7 @@ def run_network_client(client, role='player', scale=1.0,
                         replay_data = None
                     elif state.get('phase') in ('running', 'paused'):
                         confirm_exit = True
+                        confirm_choice = 1
                     else:
                         running = False
                 continue
@@ -381,7 +407,15 @@ def run_network_client(client, role='player', scale=1.0,
                 continue
             key = event.key
             if confirm_exit:
-                if key in (pg.K_RETURN, pg.K_y):
+                if key in (pg.K_LEFT, pg.K_RIGHT, pg.K_UP, pg.K_DOWN,
+                           pg.K_TAB):
+                    confirm_choice = 1 - confirm_choice
+                elif key == pg.K_RETURN:
+                    if confirm_choice == 0:
+                        running = False
+                    else:
+                        confirm_exit = False
+                elif key == pg.K_y:
                     running = False
                 elif key in (pg.K_ESCAPE, pg.K_n):
                     confirm_exit = False
@@ -471,12 +505,15 @@ def run_network_client(client, role='player', scale=1.0,
             if key == pg.K_ESCAPE:
                 if state.get('phase') in ('running', 'paused'):
                     confirm_exit = True
+                    confirm_choice = 1
                 else:
                     running = False
             elif key == pg.K_F4 and state.get('goal_count'):
                 goals_actor = observed if is_admin else client.actor
                 goals_open = True
                 send({'type': 'goals', 'actor': goals_actor})
+            elif key == pg.K_h and state.get('case_hud'):
+                show_case_panel = not show_case_panel
             elif (key == pg.K_r and is_admin and
                   state['phase'] in ('running', 'paused', 'result', 'finished')):
                 send({'type': 'replay', 'index': -1})

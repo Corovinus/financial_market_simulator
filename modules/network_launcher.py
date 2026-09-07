@@ -8,6 +8,7 @@ import threading
 import time
 
 from market.config import read_par
+from market.classic import (CLASSIC_LABELS, bond_hud, classic_level)
 from market.generator import generate_scenario
 from market.network import (
     DEFAULT_PORT, LanClient, LanServer, discover_games, local_address,
@@ -23,16 +24,36 @@ ROOT = Path(__file__).resolve().parents[1]
 LOGGER = logging.getLogger('fast.network.launcher')
 
 
-def teacher_scenario(settings):
-    """Apply classroom pacing and visibility settings to B01 or B02."""
-    scenario = read_par(ROOT / f'data/original/{settings["scenario"]}.PAR')
-    return replace(
+NETWORK_CASES = ('B01', 'B02') + CLASSIC_LABELS
+NETWORK_CASE_NAMES = {
+    'B01': 'B01 · купонные и бескупонные облигации',
+    'B02': 'B02 · переменная процентная ставка',
+    **{label: label.replace('Case ', '') for label in CLASSIC_LABELS},
+}
+
+
+def teacher_level(settings, seed=0):
+    """Build the selected classroom scenario and its case-specific HUD."""
+    selected = settings['scenario']
+    if selected in CLASSIC_LABELS:
+        level = classic_level(selected, seed)
+        scenario, case_hud = level.scenario, level.hud
+    else:
+        scenario = read_par(ROOT / f'data/original/{selected}.PAR')
+        case_hud = bond_hud(f'Case {selected}')
+    scenario = replace(
         scenario, duration_ticks=settings['duration'] * 10,
         reaction_ticks=settings['reaction'] * 10,
         queue=settings['queue'], hints=settings['hints'],
         robot_style=settings.get('robot_style', 'balanced'),
         robot_value_spread=settings.get('robot_value_spread', 20) / 100,
         robot_max_quantity=settings.get('robot_max_quantity', 99))
+    return scenario, case_hud
+
+
+def teacher_scenario(settings):
+    """Compatibility helper returning only the configured scenario."""
+    return teacher_level(settings)[0]
 
 
 def run_network_launcher(scale=1.0):
@@ -108,15 +129,16 @@ def run_network_launcher(scale=1.0):
         seed = int(time.time())
         if generated:
             scenario = generate_scenario(seed, 'normal')
+            case_hud = None
             players, bots = 4, 4
             room_name = f'Быстрая игра · {player_name}'
         else:
-            scenario = teacher_scenario(teacher)
+            scenario, case_hud = teacher_level(teacher, seed)
             players, bots = teacher['players'], teacher['bots']
             room_name = teacher['name']
         server = LanServer(
             scenario, port=DEFAULT_PORT, human_slots=players, bots=bots,
-            seed=seed, room_name=room_name).start()
+            seed=seed, room_name=room_name, case_hud=case_hud).start()
         role = 'host' if generated else 'admin'
         name = player_name if generated else 'Преподаватель'
         client = None
@@ -162,7 +184,8 @@ def run_network_launcher(scale=1.0):
     def change_setting(delta):
         key = setting_rows[setting_index][1]
         if key == 'scenario':
-            settings[key] = 'B02' if settings[key] == 'B01' else 'B01'
+            current = NETWORK_CASES.index(settings[key])
+            settings[key] = NETWORK_CASES[(current + delta) % len(NETWORK_CASES)]
         elif key == 'robot_style':
             styles = ('cautious', 'balanced', 'aggressive')
             settings[key] = styles[(styles.index(settings[key]) + delta) % 3]
@@ -353,10 +376,12 @@ def run_network_launcher(scale=1.0):
                 active = field == -1 and index == room_index
                 rounded(pg, screen, rect,
                         COLORS['accent'] if active else COLORS['background_alt'], 8)
-                write(room['name'][:30], 108, rect.y + 7,
+                room_caption = (f'{room["name"]} · {room.get("case", "")}'
+                                if room.get('case') else room['name'])
+                write(room_caption[:34], 108, rect.y + 7,
                       COLORS['white'] if active else COLORS['text'], small)
-                write(f'{room["players"]}/{room["capacity"]} игроков · {room["bots"]} роботов · {room["address"]}',
-                      420, rect.y + 7,
+                write(f'{room["players"]}/{room["capacity"]} · {room["bots"]} роб. · {room["address"]}',
+                      500, rect.y + 7,
                       COLORS['white'] if active else COLORS['muted'], small)
             if not rooms:
                 write('Комнаты появятся здесь автоматически', 108, 174,
@@ -397,6 +422,8 @@ def run_network_launcher(scale=1.0):
                     shown = {'cautious': 'Осторожный',
                              'balanced': 'Сбалансированный',
                              'aggressive': 'Агрессивный'}[value]
+                elif key == 'scenario':
+                    shown = NETWORK_CASE_NAMES[value]
                 if key == 'name' and editing_name:
                     shown += '_'
                 write(caption, 98, rect.y + 5,

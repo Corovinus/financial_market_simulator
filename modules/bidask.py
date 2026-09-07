@@ -90,6 +90,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     goals_selected = 0
     final_goals = None
     confirm_exit = False
+    confirm_choice = 1
     mouse = None
     running = True
     clock = pg.time.Clock()
@@ -138,7 +139,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if confirm_exit:
                 draw_confirmation(pg, screen, small_font, title_font,
                                   'Выйти из активной игры?',
-                                  'Текущий период будет потерян.')
+                                  'Текущий период будет потерян.', confirm_choice)
             return
         if report_data is not None:
             draw_report(pg, screen, report_data, report_instrument,
@@ -147,7 +148,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if confirm_exit:
                 draw_confirmation(pg, screen, small_font, title_font,
                                   'Выйти из активной игры?',
-                                  'Текущий период будет потерян.')
+                                  'Текущий период будет потерян.', confirm_choice)
             return
         if replay_index is not None:
             players = {str(actor): ('Игрок' if actor == 0 else
@@ -161,7 +162,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if confirm_exit:
                 draw_confirmation(pg, screen, small_font, title_font,
                                   'Выйти из активной игры?',
-                                  'Текущий период будет потерян.')
+                                  'Текущий период будет потерян.', confirm_choice)
             return
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, COLORS['decor_top'], (920, 0), 250)
@@ -317,7 +318,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         if confirm_exit:
             draw_confirmation(pg, screen, small_font, title_font,
                               'Выйти из активной игры?',
-                              'Текущий период будет потерян.')
+                              'Текущий период будет потерян.', confirm_choice)
 
     while running:
         elapsed = clock.tick(60) / 1000.0
@@ -354,6 +355,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                     running = False
                 else:
                     confirm_exit = True
+                    confirm_choice = 1
                 continue
             if event.type == pg.MOUSEMOTION:
                 mouse = mouse_position(pg, event, window, screen)
@@ -362,7 +364,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 if confirm_exit and position:
                     yes, no = draw_confirmation(
                         pg, screen, small_font, title_font,
-                        'Выйти из активной игры?', 'Текущий период будет потерян.')
+                        'Выйти из активной игры?', 'Текущий период будет потерян.',
+                        confirm_choice)
                     if yes.collidepoint(position):
                         running = False
                     elif no.collidepoint(position):
@@ -378,6 +381,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                         running = False
                     else:
                         confirm_exit = True
+                        confirm_choice = 1
                 elif position and not result_screen:
                     selected_quote = next(((index, side) for index, side, rect in quote_rects()
                                            if rect.collidepoint(position)), None)
@@ -396,7 +400,15 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 continue
             key = event.key
             if confirm_exit:
-                if key in (pg.K_RETURN, pg.K_y):
+                if key in (pg.K_LEFT, pg.K_RIGHT, pg.K_UP, pg.K_DOWN,
+                           pg.K_TAB):
+                    confirm_choice = 1 - confirm_choice
+                elif key == pg.K_RETURN:
+                    if confirm_choice == 0:
+                        running = False
+                    else:
+                        confirm_exit = False
+                elif key == pg.K_y:
                     running = False
                 elif key in (pg.K_ESCAPE, pg.K_n):
                     confirm_exit = False
@@ -516,6 +528,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 continue
             if key == pg.K_ESCAPE or key == pg.K_e:
                 confirm_exit = True
+                confirm_choice = 1
             elif key == pg.K_UP:
                 selected_instrument = (selected_instrument - 1) % len(scenario.names)
             elif key == pg.K_DOWN:

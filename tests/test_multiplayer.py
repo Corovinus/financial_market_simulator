@@ -5,11 +5,12 @@ import unittest
 from unittest.mock import patch
 
 from market.config import Goal, Scenario, read_par
+from market.classic import CLASSIC_LABELS, classic_level
 from market.generator import generate_scenario
 from market.network import (
     GameSession, LanClient, LanServer, discover_games, parse_endpoint,
 )
-from modules.network_launcher import teacher_scenario
+from modules.network_launcher import teacher_level, teacher_scenario
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -70,6 +71,57 @@ class MultiplayerTests(unittest.TestCase):
         self.assertEqual((scenario.robot_style, scenario.robot_value_spread,
                           scenario.robot_max_quantity),
                          ('cautious', .1, 15))
+
+    def test_teacher_can_host_every_classic_market(self):
+        settings = {'duration': 90, 'reaction': 4, 'queue': True,
+                    'hints': True, 'robot_style': 'balanced',
+                    'robot_value_spread': 20, 'robot_max_quantity': 25}
+        for label in CLASSIC_LABELS:
+            with self.subTest(label=label):
+                scenario, hud = teacher_level(
+                    {**settings, 'scenario': label}, seed=17)
+                self.assertEqual(hud.label, label)
+                self.assertEqual((scenario.duration_ticks,
+                                  scenario.reaction_ticks), (900, 40))
+
+    def test_private_case_state_is_scoped_and_hides_future_outcome(self):
+        level = classic_level('Case RE1', seed=7)
+        game = GameSession(level.scenario, human_slots=2, bots=0, seed=7,
+                           case_hud=level.hud)
+        first = game.join('Первый')
+        second = game.join('Второй')
+        first_state = game.state(False, first)
+        second_state = game.state(False, second)
+        teacher_state = game.state(True)
+        self.assertEqual(len(first_state['case_hud']['private_information']), 1)
+        self.assertEqual(len(second_state['case_hud']['private_information']), 1)
+        self.assertEqual(len(teacher_state['case_hud']['private_information']), 6)
+        self.assertIsNone(first_state['seed'])
+        self.assertFalse(first_state['hints'])
+        self.assertTrue(all(not any(row) for row in first_state['payments']))
+        self.assertEqual(teacher_state['seed'], 7)
+        self.assertEqual(teacher_state['payments'], level.scenario.payments)
+
+        option = classic_level('Case OP2', seed=9)
+        option_game = GameSession(option.scenario, human_slots=1, bots=0,
+                                  seed=9, case_hud=option.hud)
+        actor = option_game.join('Игрок')
+        self.assertEqual(len(option_game.state(False, actor)['case_hud']
+                             ['option_path']), 1)
+
+    def test_fixed_price_market_maker_is_not_a_student(self):
+        level = classic_level('Case OP1', seed=3)
+        game = GameSession(level.scenario, human_slots=2, bots=0, seed=3,
+                           case_hud=level.hud)
+        buyer = game.join('Покупатель')
+        other_student = game.join('Другой студент')
+        game.start_or_continue()
+        maker = game.market.fixed_owner
+        self.assertGreaterEqual(maker, game.human_slots)
+        before = game.market.portfolios[other_student].cash
+        game.trade(buyer, {'kind': 'buy', 'instrument': 0, 'quantity': 1})
+        self.assertEqual(game.market.portfolios[other_student].cash, before)
+        self.assertEqual(game.market.portfolios[maker].positions[0], 99)
 
     def test_open_room_is_discovered_on_local_network(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')

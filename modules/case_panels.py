@@ -1,6 +1,9 @@
 """Case-specific information panels shown beside the shared order book."""
+from types import SimpleNamespace
+
 from market.calculations import bond_value
-from market.classic import ca_portfolio_statistics, private_value_range
+from market.classic import (CaseHUD, ca_portfolio_statistics,
+                            private_value_range)
 from .theme import COLORS, label, rounded
 
 
@@ -64,7 +67,7 @@ def _matrix(pg, surface, rect, name, codes, values, face):
                    rect.y + row * cell_h + 4), COLORS['text'])
 
 
-def _draw_re(pg, surface, rect, hud, market, fonts):
+def _draw_re(pg, surface, rect, hud, market, fonts, private_actor=0):
     _body, small, _title = fonts
     count = len(hud.payoff_matrices)
     range_height = 84
@@ -81,7 +84,7 @@ def _draw_re(pg, surface, rect, hud, market, fonts):
     _box(pg, surface, range_rect, (111, 37, 137), (193, 112, 214), 8)
     _text(pg, surface, small, 'Диапазон по вашей информации',
           (range_rect.x + 12, range_rect.y + 8), (245, 224, 255))
-    private = hud.private_information[0]
+    private = hud.private_information[private_actor % len(hud.private_information)]
     for index, (codes, matrix, excluded) in enumerate(zip(
             hud.event_codes, hud.payoff_matrices, private)):
         low, high = private_value_range(matrix, codes, *excluded)
@@ -153,6 +156,33 @@ def draw_case_panel(pg, surface, rect, hud, market, selected, period, fonts):
         _draw_option(pg, surface, rect, hud, market, period, fonts)
     else:
         _draw_bond(pg, surface, rect, hud, market, selected, period, fonts)
+
+
+def draw_network_case_panel(pg, surface, rect, payload, state, selected,
+                            observed, fonts, admin=False):
+    """Draw a case HUD from the actor-scoped state sent by the server."""
+    hud = CaseHUD(**payload)
+    scenario = SimpleNamespace(
+        names=tuple(row['name'] for row in state['book']),
+        periods=state['periods'], rates=tuple(state['rates']),
+        payments=tuple(tuple(row) for row in state['payments']))
+    portfolio = state['portfolios'].get(str(observed))
+    market = SimpleNamespace(
+        scenario=scenario,
+        portfolios=([SimpleNamespace(cash=portfolio['cash'],
+                                     positions=portfolio['positions'])]
+                    if portfolio else []))
+    if hud.label.startswith('Case CA'):
+        if portfolio:
+            _draw_ca(pg, surface, rect, hud, market, fonts)
+    elif hud.label.startswith('Case RE'):
+        private_actor = observed if admin else 0
+        _draw_re(pg, surface, rect, hud, market, fonts, private_actor)
+    elif hud.label.startswith('Case OP'):
+        _draw_option(pg, surface, rect, hud, market, state['period'], fonts)
+    else:
+        _draw_bond(pg, surface, rect, hud, market, selected,
+                   state['period'], fonts)
 
 
 def case_information_line(hud):

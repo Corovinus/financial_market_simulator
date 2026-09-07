@@ -9,6 +9,7 @@ import time
 
 from main import configure_logging
 from market.config import read_par
+from market.classic import CLASSIC_LABELS, bond_hud, classic_level
 from market.generator import generate_scenario
 from market.network import (
     DEFAULT_PORT, LanClient, LanServer, local_address, parse_endpoint,
@@ -23,10 +24,17 @@ LOGGER = logging.getLogger('fast.multiplayer')
 
 def host_game(args, generated=False):
     seed = args.seed if args.seed is not None else int(time.time())
+    case_hud = None
     if generated:
         scenario = generate_scenario(seed, args.difficulty)
+    elif args.case:
+        level = classic_level(args.case, seed)
+        scenario, case_hud = level.scenario, level.hud
     else:
         scenario = read_par(args.scenario)
+        if args.scenario.stem.upper() in ('B01', 'B02'):
+            case_hud = bond_hud(f'Case {args.scenario.stem.upper()}')
+    if not generated:
         if args.duration is not None:
             scenario = replace(scenario, duration_ticks=round(args.duration * 10))
         if args.reaction is not None:
@@ -36,7 +44,8 @@ def host_game(args, generated=False):
         robot_value_spread=args.robot_value_spread / 100,
         robot_max_quantity=args.robot_max_quantity)
     server = LanServer(scenario, args.bind, args.port, args.players,
-                       args.bots, seed, room_name=args.room_name).start()
+                       args.bots, seed, room_name=args.room_name,
+                       case_hud=case_hud).start()
     address = local_address()
     print(f'Комната: {address}:{server.address[1]}')
     print(f'Ключ администратора: {server.admin_key}')
@@ -73,6 +82,8 @@ def parser():
     admin = commands.add_parser('admin', help='Создать игру преподавателя')
     admin.add_argument('--scenario', type=Path,
                        default=ROOT / 'data/original/B01.PAR')
+    admin.add_argument('--case', choices=CLASSIC_LABELS,
+                       help='Встроенный режим CA, OP или RE вместо PAR-файла')
     admin.add_argument('--players', type=int, default=8)
     admin.add_argument('--bots', type=int, default=2)
     admin.add_argument('--duration', type=float, help='Длительность периода, сек.')

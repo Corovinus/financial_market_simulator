@@ -121,7 +121,8 @@ def draw_tooltip(pygame, surface, typeface, value, position):
     surface.blit(rendered, rect)
 
 
-def draw_confirmation(pygame, surface, body, title, heading, message):
+def draw_confirmation(pygame, surface, body, title, heading, message,
+                      selected=1):
     box = pygame.Rect(180, 196, 600, 210)
     rounded(pygame, surface, box, COLORS['panel_alt'], 16)
     rounded(pygame, surface, box, COLORS['danger'], 16, 2)
@@ -129,11 +130,19 @@ def draw_confirmation(pygame, surface, body, title, heading, message):
     label(pygame, surface, body, message, (220, 278), COLORS['muted'])
     yes = pygame.Rect(220, 330, 250, 46)
     no = pygame.Rect(490, 330, 250, 46)
-    rounded(pygame, surface, yes, COLORS['danger'], 9)
-    rounded(pygame, surface, no, COLORS['background_alt'], 9)
+    rounded(pygame, surface, yes,
+            COLORS['danger'] if selected == 0 else COLORS['background_alt'], 9)
+    rounded(pygame, surface, yes, COLORS['danger'], 9, 1)
+    rounded(pygame, surface, no,
+            COLORS['accent'] if selected == 1 else COLORS['background_alt'], 9)
     rounded(pygame, surface, no, COLORS['border'], 9, 1)
+    if selected in (0, 1):
+        choice = yes if selected == 0 else no
+        rounded(pygame, surface, choice, COLORS['accent_alt'], 9, 3)
     label(pygame, surface, body, 'Выйти', (yes.x + 88, yes.y + 12),
-          COLORS['white'])
+          COLORS['white'] if selected == 0 else COLORS['danger'])
     label(pygame, surface, body, 'Продолжить', (no.x + 70, no.y + 12),
-          COLORS['text'])
+          COLORS['white'] if selected == 1 else COLORS['text'])
+    label(pygame, surface, body, '← →  выбор · Enter  подтвердить',
+          (box.x + 155, box.bottom - 18), COLORS['muted'])
     return yes, no
