@@ -31,6 +31,7 @@ class Market:
         self.portfolios = [Portfolio(scenario.cash, list(scenario.positions))
                            for _ in range(scenario.robots + 1)]
         self.book = OrderBook(len(scenario.names), scenario.queue)
+        self._recent_trades = [[] for _ in scenario.names]
         self.period = 0
         self.started = False
         self.replay_frames = []
@@ -49,6 +50,8 @@ class Market:
                 raise ValueError('Неверный период')
             self.period = period
         self.book.reset()
+        for trades in self._recent_trades:
+            trades.clear()
         for instrument, prices in enumerate(self.scenario.fixed_prices):
             price = prices[self.period]
             if price is not None and self.scenario.tradable[instrument]:
@@ -81,6 +84,7 @@ class Market:
                 self.portfolios[seller].positions[instrument] < quantity):
             raise OrderError('Короткая позиция на этом рынке запрещена')
         trade = self.book.take(actor, instrument, side, quantity)
+        self._recent_trades[instrument].insert(0, trade)
         buyer, seller = trade.buyer, trade.seller
         value = trade.price * trade.quantity
         self.portfolios[buyer].cash -= value
@@ -105,6 +109,12 @@ class Market:
 
     def history_for(self, instrument, side):
         return self.book.history(instrument, side)
+
+    def recent_trades(self, instrument):
+        if (type(instrument) is not int or
+                not 0 <= instrument < len(self.scenario.names)):
+            raise OrderError('Неверный номер бумаги')
+        return tuple(self._recent_trades[instrument][:3])
 
     def finish_period(self):
         """Apply the original cash interest and signed-16-bit payout products.

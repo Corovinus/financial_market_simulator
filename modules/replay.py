@@ -44,7 +44,7 @@ def draw_replay_frame(pygame, screen, frame, index, total, names,
     if instrument is not None and 0 <= instrument < len(names):
         detail += f' · {names[instrument]}'
     if frame.get('price') is not None:
-        detail += f' · {frame["price"]}.{frame["quantity"]:02d}'
+        detail += f' · {frame["price"]}.{frame["quantity"]}'
     write(detail[:90], 48, 110, COLORS['accent_alt'], body)
     write(f'Период {frame["period"] + 1}', 48, 139, COLORS['muted'], small)
 
@@ -71,7 +71,7 @@ def draw_replay_frame(pygame, screen, frame, index, total, names,
                 write('—', x + 12, y + 5, COLORS['muted'], small)
             else:
                 owner, price, quantity = quote
-                write(f'{price}.{quantity:02d}', x + 10, y + 5, color, small)
+                write(f'{price}.{quantity}', x + 10, y + 5, color, small)
                 write(f'ID {owner + 1}', x + 92, y + 5,
                       COLORS['muted'], small)
 

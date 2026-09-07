@@ -8,6 +8,7 @@ import logging
 import time
 
 from market.calculations import bond_value
+from market.classic import bond_hud
 from market.config import parse_offer, read_par, Scenario
 from market.engine import Market
 from market.goals import evaluate_goals
@@ -15,6 +16,7 @@ from market.orderbook import OrderError
 from market.report import build_report, default_report_folder, export_report
 from market.robots import RobotController
 from .display import handle_window_event, open_scaled_display, present_scaled
+from .case_panels import case_information_line, draw_case_panel
 from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
@@ -31,7 +33,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                 scale: float = 1.0, close_display: bool = True,
                 session_title: str = 'Торговая сессия',
                 info_lines: tuple[str, ...] = (),
-                result_lines: tuple[str, ...] = ()):
+                result_lines: tuple[str, ...] = (), case_hud=None):
     """Run one B01/B02 attempt and return the final capital.
 
     ``speed`` scales the original decisecond clock.  The default therefore
@@ -40,7 +42,11 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     initialization, action types and random-number generator.
     """
     if isinstance(scenario, (str, Path)):
-        scenario = read_par(scenario)
+        source = Path(scenario)
+        scenario = read_par(source)
+        if source.stem.upper() in ('B01', 'B02') and case_hud is None:
+            case_hud = bond_hud(f'Case {source.stem.upper()}')
+            session_title = f'Рынок облигаций · {source.stem.upper()}'
     if not isinstance(scenario, Scenario):
         raise TypeError('Ожидался Scenario или путь к PAR')
     if not isinstance(speed, (int, float)) or speed <= 0:
@@ -49,7 +55,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
     import pygame as pg
 
     pg.init()
-    screen, window = open_scaled_display(pg, (960, 600), scale, 'FAST — BIDASK')
+    screen, window = open_scaled_display(pg, (960, 680), scale, 'FAST — BIDASK')
     body_font = font(pg, 18)
     small_font = font(pg, 14)
     title_font = font(pg, 28, bold=True)
@@ -106,7 +112,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         return True
 
     def quote_text(quote):
-        return '' if quote is None else f'{quote.price}.{quote.quantity:02d}'
+        return '' if quote is None else f'{quote.price}.{quote.quantity}'
 
     def visible_instruments():
         start = min(max(0, selected_instrument - 3),
@@ -119,8 +125,8 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             yield index, 'bid', pg.Rect(204, y, 150, 42)
             yield index, 'ask', pg.Rect(372, y, 150, 42)
 
-    buy_button = pg.Rect(654, 482, 132, 38)
-    sell_button = pg.Rect(804, 482, 132, 38)
+    buy_button = pg.Rect(654, 528, 132, 42)
+    sell_button = pg.Rect(804, 528, 132, 42)
 
     def draw():
         if goals_data is not None:
@@ -160,10 +166,12 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
         screen.fill(COLORS['background'])
         pg.draw.circle(screen, COLORS['decor_top'], (920, 0), 250)
         rounded(pg, screen, pg.Rect(24, 18, 912, 58), COLORS['panel'], 15)
-        write(session_title[:34], 48, 30, COLORS['accent'], title_font)
+        write(session_title[:28], 48, 30, COLORS['accent'], title_font)
         if scenario.goals:
             write(f'F4 · цели ({len(scenario.goals)})', 350, 38,
                   COLORS['accent_alt'], small_font)
+        write('Попытка 1', 438, 36, COLORS['muted'], small_font)
+        write('ID 1', 520, 36, COLORS['muted'], small_font)
         write(f'Период {period + 1} / {scenario.periods}', 570, 34,
               COLORS['text'], body_font)
         write(f'{max(0, int(remaining / 10))} сек.', 720, 34,
@@ -201,29 +209,19 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             if scenario.hints and show_hints:
                 rounded(pg, screen, pg.Rect(536, y + 44, 84, 24), COLORS['accent'], 6)
                 write(f'{bond_value(scenario, index, period):.3f}', 544, y + 47, COLORS['white'], small_font)
-        card(pg, screen, pg.Rect(654, 112, 282, 166), COLORS['panel'], COLORS['border'])
-        write('Счёт участника', 676, 132, COLORS['text'], body_font)
-        write('Деньги', 676, 178, COLORS['muted'], small_font)
-        write(f'{market.portfolios[0].cash:.0f}', 820, 174, COLORS['text'], body_font)
-        write('Ставка', 676, 218, COLORS['muted'], small_font)
-        write(f'{scenario.rates[period]}%', 820, 214, COLORS['text'], body_font)
-        write('Участники', 676, 252, COLORS['muted'], small_font)
-        write(str(scenario.robots + 1), 820, 248, COLORS['text'], body_font)
-        card(pg, screen, pg.Rect(654, 300, 282, 168), COLORS['panel'], COLORS['border'])
-        details = result_lines if result_screen and result_lines else info_lines
-        if details:
-            write('Условия рынка', 676, 320, COLORS['text'], body_font)
-            for n, line in enumerate(details[:4]):
-                write(line[:34], 676, 360 + n * 24,
+        if case_hud is not None:
+            draw_case_panel(pg, screen, pg.Rect(654, 112, 282, 356),
+                            case_hud, market, selected_instrument, period,
+                            (body_font, small_font, title_font))
+        else:
+            card(pg, screen, pg.Rect(654, 112, 282, 356),
+                 COLORS['panel'], COLORS['border'])
+            write('Условия рынка', 676, 132, COLORS['text'], body_font)
+            details = result_lines if result_screen and result_lines else info_lines
+            for n, line in enumerate(details[:8]):
+                write(line[:34], 676, 176 + n * 28,
                       COLORS['accent_alt'] if n == 0 else COLORS['muted'],
                       small_font)
-        else:
-            write('Последние сделки', 676, 320, COLORS['text'], body_font)
-            history = (market.history_for(selected_instrument, 'ask') +
-                       market.history_for(selected_instrument, 'bid'))
-            for n, trade in enumerate(history[:3]):
-                write(f'{trade.price}.{trade.quantity:02d}  ID {trade.buyer + 1}/{trade.seller + 1}',
-                      676, 366 + n * 28, COLORS['accent_alt'], small_font)
         if result_screen:
             rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['panel_alt'], 16)
             rounded(pg, screen, pg.Rect(164, 222, 560, 188), COLORS['accent'], 2, 2)
@@ -243,29 +241,69 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                            'Enter — завершить попытку   Esc — выход')
         else:
             action_text = '↑↓ бумага   ←→ Bid/Ask   цифры — заявка   Esc — выход'
-        write(action_text, 54, 494, COLORS['muted'], small_font)
+        player = market.portfolios[0]
+        card(pg, screen, pg.Rect(36, 478, 592, 42),
+             COLORS['panel'], COLORS['border'])
+        write(f'Cash  {player.cash:.0f}', 52, 490, COLORS['text'], small_font)
+        write(f'Int  {scenario.rates[period]}%', 184, 490,
+              COLORS['text'], small_font)
+        write('ID  1', 282, 490, COLORS['text'], small_font)
+        write(f'Бумага  {scenario.names[selected_instrument]}', 366, 490,
+              COLORS['warning'], small_font)
+        card(pg, screen, pg.Rect(36, 528, 592, 42),
+             COLORS['panel'], COLORS['border'])
+        write('Последние сделки:', 52, 540, COLORS['muted'], small_font)
+        for n, trade in enumerate(market.recent_trades(selected_instrument)):
+            write(f'{trade.price}.{trade.quantity}', 212 + n * 118, 540,
+                  COLORS['accent_alt'], small_font)
+        if not market.recent_trades(selected_instrument):
+            write('—', 212, 540, COLORS['muted'], small_font)
+        info_box = pg.Rect(36, 578, 900, 62)
+        card(pg, screen, info_box, COLORS['panel_alt'], COLORS['border'])
+        private_line = case_information_line(case_hud)
+        if private_line:
+            write(private_line[:105], 52, 588, COLORS['accent_alt'], small_font)
+        help_y = 612 if private_line else 598
+        explanation = ('Bid — предложение купить в формате price.quantity'
+                       if selected_side == 'bid' else
+                       'Ask — предложение продать в формате price.quantity')
+        if mouse and buy_button.collidepoint(mouse):
+            explanation = 'Купить — принять лучшую заявку Ask выбранной бумаги'
+        elif mouse and sell_button.collidepoint(mouse):
+            explanation = 'Продать — принять лучшую заявку Bid выбранной бумаги'
+        elif mouse and back_button(pg).collidepoint(mouse):
+            explanation = 'Назад — выйти из активной торговой сессии'
+        if input_mode == 'buy':
+            explanation = 'Введите количество бумаг для покупки'
+        elif input_mode == 'sell':
+            explanation = 'Введите количество бумаг для продажи'
+        elif input_mode == 'quote':
+            explanation = ('Введите price.quantity: после точки указывается '
+                           'количество, а не дробная цена')
+        shown_status = status if status and time.monotonic() < status_until else explanation
+        write(shown_status[:100], 52, help_y,
+              COLORS['warning'] if shown_status == status else COLORS['muted'],
+              small_font)
+        write(action_text, 54, 650, COLORS['muted'], small_font)
         if result_screen:
-            write('R — посмотреть повтор', 682, 472,
+            write('R — посмотреть повтор', 682, 486,
                   COLORS['accent_alt'], small_font)
             if period + 1 == scenario.periods:
-                write('F2 — итоговый отчёт', 682, 494,
+                write('F2 — итоговый отчёт', 682, 508,
                       COLORS['accent_alt'], small_font)
         if not result_screen:
             rounded(pg, screen, buy_button, COLORS['buy'], 9)
             rounded(pg, screen, sell_button, COLORS['sell'], 9)
-            write('B  Купить', buy_button.x + 20, buy_button.y + 9, COLORS['black'], small_font)
-            write('S  Продать', sell_button.x + 18, sell_button.y + 9, COLORS['black'], small_font)
+            write('B  Купить', buy_button.x + 20, buy_button.y + 11, COLORS['black'], small_font)
+            write('S  Продать', sell_button.x + 18, sell_button.y + 11, COLORS['black'], small_font)
         if input_mode:
-            prompt = 'Покупаю: ' if input_mode == 'buy' else 'Продаю: ' if input_mode == 'sell' else 'Заявка: '
-            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['panel_alt'], 10)
-            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['accent'], 1, 2)
-            write(prompt + input_text + '_', 54, 538, COLORS['text'], body_font)
-        elif status and time.monotonic() < status_until:
-            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['panel_alt'], 10)
-            rounded(pg, screen, pg.Rect(36, 526, 900, 46), COLORS['warning'], 1, 2)
-            write(status[:86], 54, 538, COLORS['warning'], body_font)
-        elif last_robot_event:
-            write(last_robot_event[:86], 54, 538, COLORS['muted'], small_font)
+            prompt = ('Покупаю: ' if input_mode == 'buy' else
+                      'Продаю: ' if input_mode == 'sell' else 'Заявка: ')
+            write(prompt + input_text + '_', 520, help_y,
+                  COLORS['text'], small_font)
+        elif last_robot_event and not private_line and shown_status != status:
+            write(last_robot_event[:54], 470, help_y,
+                  COLORS['muted'], small_font)
         draw_back_button(pg, screen, small_font)
         tooltip = None
         if mouse and back_button(pg).collidepoint(mouse):
@@ -292,7 +330,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                         'sell': 'продал'}[robot_event.action]
                 last_robot_event = (f'ID {robot_event.actor + 1}: {verb} '
                                     f'{scenario.names[robot_event.instrument]} '
-                                    f'{robot_event.price}.{robot_event.quantity:02d}')
+                                    f'{robot_event.price}.{robot_event.quantity}')
                 LOGGER.info('Robot action: actor=%s instrument=%s action=%s price=%s quantity=%s',
                             robot_event.actor, robot_event.instrument,
                             robot_event.action, robot_event.price,
@@ -466,7 +504,7 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                             column = selected_side.capitalize()
                             message(
                                 f'Сделка совершена · {column}: '
-                                + (f'{remainder.price}.{remainder.quantity:02d}'
+                                + (f'{remainder.price}.{remainder.quantity}'
                                    if remainder else
                                    'заявка исполнена полностью'))
                         input_mode, input_text = None, ''

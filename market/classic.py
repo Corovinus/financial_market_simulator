@@ -24,11 +24,52 @@ class ClassicLevel:
     info: tuple[str, ...]
     result: tuple[str, ...]
     seed: int
+    hud: 'CaseHUD'
+
+
+@dataclass(frozen=True)
+class CaseHUD:
+    label: str
+    price_scenarios: tuple[tuple[int, ...], ...] = ()
+    payoff_matrices: tuple[tuple[tuple[int, ...], ...], ...] = ()
+    event_codes: tuple[tuple[str, ...], ...] = ()
+    private_information: tuple[tuple[tuple[str, str], ...], ...] = ()
+    option_parameters: tuple[float, ...] = ()
+    option_path: tuple[int, ...] = ()
+
+
+def ca_portfolio_statistics(cash, positions, price_scenarios):
+    """Return the CA screen's mean and mislabeled sample deviation."""
+    wealth = tuple(
+        cash * 1.12 + sum(quantity * prices[state]
+                          for quantity, prices in zip(positions,
+                                                      price_scenarios))
+        for state in range(len(price_scenarios[0])))
+    mean = sum(wealth) / len(wealth)
+    risk = math.sqrt(sum((value - mean) ** 2 for value in wealth) /
+                     (len(wealth) - 1))
+    return mean, risk
+
+
+def private_value_range(matrix, codes, excluded_first, excluded_second):
+    """Calculate the visible RE range after both private exclusions."""
+    values = tuple(
+        value
+        for row_code, row in zip(codes, matrix)
+        if row_code != excluded_first
+        for column_code, value in zip(codes, row)
+        if column_code != excluded_second)
+    if not values:
+        raise ValueError('Приватная информация исключила все состояния')
+    return min(values), max(values)
+
+
+def bond_hud(label):
+    return CaseHUD(label=label)
 
 
 def _signal(rng, codes, actual):
-    excluded = rng.choice(tuple(code for code in codes if code != actual))
-    return f'не {excluded}'
+    return rng.choice(tuple(code for code in codes if code != actual))
 
 
 def _scenario(*, periods, rates, names, payments, cash, positions,
@@ -54,7 +95,7 @@ def _ca(label, rng, seed):
     portfolios = ((-8084, (316, 24, 52)), (-3354, (78, 100, 52)),
                   (-5364, (78, 24, 210)), (4200, (0, 0, 0)))
     event = rng.randrange(10)
-    investor = rng.randrange(4)
+    investor = 0
     cash, positions = portfolios[investor]
     fixed = label == 'Case CA2'
     short_sales = label == 'Case CA3'
@@ -77,8 +118,9 @@ def _ca(label, rng, seed):
     result = (f'реализован сценарий {event + 1}',
               'цены: ' + ' / '.join(str(row[event]) for row in prices),
               'процент на деньги: 12%', restriction)
+    hud = CaseHUD(label=label, price_scenarios=prices)
     return ClassicLevel(scenario, f'Рынок акций · {label[-3:]}', info,
-                        result, seed)
+                        result, seed, hud)
 
 
 def _option(label, rng, seed):
@@ -128,8 +170,11 @@ def _option(label, rng, seed):
     result = ('путь акции: ' + ' → '.join(map(str, path)),
               f'финальная акция: {final}', f'Put: {put} · Call: {call}',
               f'облигация: {bond}')
+    hud = CaseHUD(label=label,
+                  option_parameters=(spot, strike, sigma, u, d, probability),
+                  option_path=tuple(path))
     return ClassicLevel(scenario, f'Рынок опционов · {label[-3:]}', info,
-                        result, seed)
+                        result, seed, hud)
 
 
 def _re(label, rng, seed):
@@ -161,12 +206,18 @@ def _re(label, rng, seed):
     if label == 'Case RE2':
         first = (first[0], first[1], first[1])
         second = (second[0], second[1], second[1])
+    payoff_matrices = tuple(
+        tuple(tuple(dividends[instrument][row] + value for value in values)
+              for row, values in enumerate(matrix))
+        for instrument, matrix in enumerate(terminal))
     payments = [(dividends[i][first[i]], terminal[i][first[i]][second[i]])
                 for i in range(len(codes))]
-    signals = tuple(
-        (_signal(rng, codes[i], codes[i][first[i]]),
-         _signal(rng, codes[i], codes[i][second[i]]))
-        for i in range(len(codes)))
+    private_information = tuple(
+        tuple(
+            (_signal(rng, codes[i], codes[i][first[i]]),
+             _signal(rng, codes[i], codes[i][second[i]]))
+            for i in range(len(codes)))
+        for _actor in range(6))
     if label == 'Case RE3':
         final_stock = payments[0][1]
         payments.extend(((0, max(30 - final_stock, 0)),
@@ -175,15 +226,19 @@ def _re(label, rng, seed):
         periods=2, rates=(0, 0), names=names, payments=payments,
         cash=2500, positions=positions, score=(0, 0, 10000, 5))
     info = ('независимые события двух периодов',
-            *tuple(f'{names[i]}: {signals[i][0]}; {signals[i][1]}'
+            *tuple(f'{names[i]}: не {private_information[0][i][0]}; '
+                   f'не {private_information[0][i][1]}'
                    for i in range(min(2, len(codes)))),
             'кредит и короткие позиции разрешены')
     outcomes = tuple(f'{names[i]}: {codes[i][first[i]]}/{codes[i][second[i]]}'
                      for i in range(len(codes)))
     result = ('реализованные события', *outcomes,
               'выплаты: ' + ' / '.join(str(row[1]) for row in payments))
+    hud = CaseHUD(label=label, payoff_matrices=payoff_matrices,
+                  event_codes=codes,
+                  private_information=private_information)
     return ClassicLevel(scenario, f'Эффект. рынка · {label[-3:]}',
-                        info[:4], result[:4], seed)
+                        info[:4], result[:4], seed, hud)
 
 
 def classic_level(label, seed=None):
@@ -207,4 +262,4 @@ def run_classic_session(label, speed=1.0, scale=1.0, close_display=True,
     return run_session(
         level.scenario, speed, scale, close_display,
         session_title=level.title, info_lines=level.info,
-        result_lines=level.result)
+        result_lines=level.result, case_hud=level.hud)

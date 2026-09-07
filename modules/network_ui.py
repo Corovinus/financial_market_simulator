@@ -217,7 +217,7 @@ def run_network_client(client, role='player', scale=1.0,
                             8, 2 if active else 1)
                     if quote:
                         own = quote['owner'] == client.actor
-                        write(f'{quote["price"]}.{quote["quantity"]:02d}',
+                        write(f'{quote["price"]}.{quote["quantity"]}',
                               x + 10, y + 5,
                               COLORS['white'] if own else color, small)
                         write(f'ID {quote["owner"] + 1}', x + 88, y + 5,
@@ -246,7 +246,7 @@ def run_network_client(client, role='player', scale=1.0,
             for row, event in enumerate(reversed(actions)):
                 actor = event['actor']
                 write(f'ID {actor + 1} {event["kind"]} '
-                      f'{event["price"]}.{event["quantity"]:02d}',
+                      f'{event["price"]}.{event["quantity"]}',
                       658, 398 + row * 22, COLORS['muted'], small)
 
             if state['phase'] in ('result', 'finished'):
@@ -323,7 +323,7 @@ def run_network_client(client, role='player', scale=1.0,
                         quote = state['book'][action['instrument']][column]
                         message(
                             f'Сделка совершена · {column.capitalize()}: '
-                            + (f'{quote["price"]}.{quote["quantity"]:02d}'
+                            + (f'{quote["price"]}.{quote["quantity"]}'
                                if quote else
                                'заявка исполнена полностью'))
                 last_action = current_action

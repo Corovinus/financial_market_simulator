@@ -4,7 +4,8 @@ import tempfile
 import unittest
 
 from market.config import Goal, Scenario, read_par, parse_offer
-from market.classic import CLASSIC_LABELS, classic_level
+from market.classic import (CLASSIC_LABELS, ca_portfolio_statistics,
+                            classic_level, private_value_range)
 from market.goals import evaluate_goals
 from market.calculations import bond_value, settle, future_capital
 from market.rng import OriginalRNG
@@ -73,6 +74,41 @@ class OriginalCases(unittest.TestCase):
                          ('Put/30', 'Call/30'))
         re2 = levels['Case RE2'].scenario
         self.assertEqual(re2.payments[1][0] + re2.payments[2][0], 30)
+
+    def test_ca_risk_hud_and_re_private_ranges_match_original(self):
+        ca1 = classic_level('Case CA1', seed=7)
+        self.assertEqual((ca1.scenario.cash, ca1.scenario.positions),
+                         (-8084, (316, 24, 52)))
+        mean, risk = ca_portfolio_statistics(
+            ca1.scenario.cash, ca1.scenario.positions,
+            ca1.hud.price_scenarios)
+        self.assertAlmostEqual(mean, 3894.3, places=1)
+        self.assertAlmostEqual(risk, 8181.8, places=1)
+        market = Market(ca1.scenario)
+        market.start_period(0)
+        market.submit(1, 0, 'ask', 40, 1)
+        market.take(0, 0, 'buy', 1)
+        changed = ca_portfolio_statistics(
+            market.portfolios[0].cash, market.portfolios[0].positions,
+            ca1.hud.price_scenarios)
+        self.assertNotEqual(changed, (mean, risk))
+        self.assertEqual(market.recent_trades(0)[0].quantity, 1)
+        self.assertEqual(market.recent_trades(1), ())
+
+        re1 = classic_level('Case RE1', seed=7).hud
+        self.assertEqual(len(re1.private_information), 6)
+        self.assertGreater(len(set(re1.private_information)), 1)
+        self.assertEqual(re1.payoff_matrices[0],
+                         ((0, 0, 12), (12, 24, 36), (36, 48, 48)))
+        self.assertEqual(re1.payoff_matrices[1],
+                         ((8, 8, 12, 18), (20, 20, 24, 30),
+                          (20, 20, 24, 30), (32, 32, 36, 42)))
+        self.assertEqual(private_value_range(
+            re1.payoff_matrices[0], re1.event_codes[0], 'x', 'z'),
+            (12, 48))
+        self.assertEqual(private_value_range(
+            re1.payoff_matrices[1], re1.event_codes[1], 'z', 'z'),
+            (8, 24))
 
     def test_interface_preferences_are_validated_and_themes_apply(self):
         values = normalize_preferences({
