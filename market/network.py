@@ -12,11 +12,13 @@ import time
 
 from .config import Scenario
 from .calculations import bond_value, future_capital
+from .classic import ca_portfolio_statistics
 from .engine import Market
 from .goals import evaluate_goals
 from .orderbook import OrderError
 from .report import build_report
 from .robots import RobotController
+from .version import APP_VERSION, PROTOCOL_VERSION
 
 
 LOGGER = logging.getLogger('fast.network')
@@ -71,6 +73,10 @@ class GameSession:
         self.remaining = float(self.scenario.duration_ticks)
         self.phase = 'lobby'
         self.players = {}
+        self.human_actors = set()
+        self.client_versions = {}
+        self.ready = set()
+        self.removed = set()
         self.reconnect_tokens = {}
         self.connected = set()
         self.actions = []
@@ -81,31 +87,33 @@ class GameSession:
         self._lock = threading.RLock()
         self._fair_values = self._calculate_fair_values()
 
-    def join(self, name, reconnect_token=None):
+    def join(self, name, reconnect_token=None, client_version=None):
         clean = str(name).strip()[:24]
         if not clean:
             raise ValueError('Введите имя игрока')
         with self._lock:
-            if self.phase != 'lobby':
-                actor = next((number for number, saved in self.players.items()
-                              if saved == clean and number not in self.connected),
-                             None)
-                if actor is None:
-                    raise ValueError('Игра уже началась')
+            actor = next((number for number, saved in self.players.items()
+                          if saved == clean), None)
+            if actor is not None:
+                if actor in self.connected:
+                    raise ValueError('Это имя уже занято')
                 expected = self.reconnect_tokens.get(actor, '')
                 supplied = str(reconnect_token or '').encode('utf-8')
                 if not secrets.compare_digest(expected.encode('utf-8'), supplied):
                     raise ValueError('Неверный ключ переподключения')
                 self.connected.add(actor)
+                self.client_versions[actor] = str(client_version or 'неизвестно')[:20]
                 self._record(actor, 'reconnect')
                 return actor
-            if clean in self.players.values():
-                raise ValueError('Это имя уже занято')
+            if self.phase != 'lobby':
+                raise ValueError('Игра уже началась')
             actor = next((index for index in range(self.human_slots)
                           if index not in self.players), None)
             if actor is None:
                 raise ValueError('Свободных мест нет')
             self.players[actor] = clean
+            self.human_actors.add(actor)
+            self.client_versions[actor] = str(client_version or 'неизвестно')[:20]
             self.reconnect_tokens[actor] = secrets.token_urlsafe(24)
             self.connected.add(actor)
             self._record(actor, 'join')
@@ -114,9 +122,7 @@ class GameSession:
     def disconnect(self, actor):
         with self._lock:
             self.connected.discard(actor)
-            if self.phase == 'lobby':
-                self.players.pop(actor, None)
-                self.reconnect_tokens.pop(actor, None)
+            self.ready.discard(actor)
             self._record(actor, 'disconnect')
 
     def start_or_continue(self):
@@ -124,6 +130,9 @@ class GameSession:
             if self.phase == 'lobby':
                 if not self.players:
                     raise ValueError('Нужен хотя бы один игрок')
+                waiting = set(self.players) - self.ready
+                if waiting:
+                    raise ValueError('Не все подключённые игроки готовы')
                 robot_actors = tuple(actor for actor in range(len(self.market.portfolios))
                                      if actor not in self.players)
                 self._robots = RobotController(self.market, self.seed,
@@ -147,6 +156,31 @@ class GameSession:
                     self.phase = 'running'
                     self._record(None, 'next_period')
             return self.phase
+
+    def set_ready(self, actor, ready):
+        with self._lock:
+            if self.phase != 'lobby' or actor not in self.players:
+                raise ValueError('Готовность меняется только в лобби')
+            if type(ready) is not bool:
+                raise ValueError('Неверное состояние готовности')
+            if ready:
+                self.ready.add(actor)
+            else:
+                self.ready.discard(actor)
+            self._record(actor, 'ready', value=ready)
+
+    def remove_player(self, actor):
+        with self._lock:
+            if actor not in self.players:
+                raise ValueError('Участник уже удалён')
+            if actor in self.connected:
+                raise ValueError('Можно удалить только отключившегося участника')
+            self.players.pop(actor)
+            self.reconnect_tokens.pop(actor, None)
+            self.client_versions.pop(actor, None)
+            self.ready.discard(actor)
+            self.removed.add(actor)
+            self._record(actor, 'removed')
 
     def toggle_pause(self):
         with self._lock:
@@ -235,7 +269,8 @@ class GameSession:
                 for index in visible
                 for portfolio in (self.market.portfolios[index],)
             }
-            names = {str(index): self.players.get(index, f'Робот {index + 1}')
+            names = {str(index): ('Удалён' if index in self.removed else
+                                  self.players.get(index, f'Робот {index + 1}'))
                      for index in range(len(self.market.portfolios))}
             result = self.result
             scores = self.scores
@@ -265,6 +300,7 @@ class GameSession:
                 if case_hud['label'].startswith('Case OP'):
                     case_hud['option_path'] = case_hud['option_path'][
                         :self.period + 1]
+            dashboard = self._dashboard(names) if admin else None
             return {
                 'phase': self.phase, 'period': self.period,
                 'periods': self.scenario.periods,
@@ -272,6 +308,13 @@ class GameSession:
                 'human_slots': self.human_slots, 'bots': self.bot_count,
                 'seed': visible_seed,
                 'players': names, 'connected': tuple(sorted(self.connected)),
+                'human_actors': tuple(sorted(self.human_actors)),
+                'ready': tuple(sorted(self.ready)),
+                'all_ready': bool(self.players and set(self.players) <= self.ready),
+                'versions': {str(key): value
+                             for key, value in self.client_versions.items()},
+                'server_version': APP_VERSION,
+                'protocol_version': PROTOCOL_VERSION,
                 'portfolios': portfolios, 'actions': tuple(self.actions[-30:]),
                 'result': result, 'scores': scores,
                 'rates': self.scenario.rates,
@@ -280,7 +323,41 @@ class GameSession:
                 'goal_count': len(self.scenario.goals),
                 'fair_values': fair_values,
                 'case_hud': case_hud,
+                'dashboard': dashboard,
             }
+
+    def _dashboard(self, names):
+        first_period = self.period + (self.phase in ('result', 'finished'))
+        rows = []
+        for actor, portfolio in enumerate(self.market.portfolios):
+            if actor in self.removed:
+                continue
+            capital = (portfolio.cash if first_period >= self.scenario.periods
+                       else future_capital(self.scenario, portfolio.cash,
+                                           tuple(portfolio.positions),
+                                           first_period))
+            trades = sum(
+                1 for frame in self.market.replay_frames
+                if frame.get('kind') in ('buy', 'sell') and
+                actor in (frame.get('buyer'), frame.get('seller')))
+            risk = None
+            if (self.case_hud and
+                    self.case_hud.label.startswith('Case CA')):
+                _mean, risk = ca_portfolio_statistics(
+                    portfolio.cash, portfolio.positions,
+                    self.case_hud.price_scenarios)
+            rows.append({
+                'actor': actor, 'name': names[str(actor)],
+                'human': actor in self.human_actors,
+                'connected': actor in self.connected,
+                'ready': actor in self.ready,
+                'version': self.client_versions.get(actor, APP_VERSION),
+                'cash': portfolio.cash,
+                'positions': tuple(portfolio.positions),
+                'capital': capital, 'risk': risk, 'trades': trades,
+                'score': None if self.scores is None else self.scores.get(str(actor)),
+            })
+        return rows
 
     def replay_frame(self, index):
         """Return one compact replay snapshot for an administrator."""
@@ -339,7 +416,8 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                 if role == 'host' and first.get('key') != self.server.admin_key:
                     raise ValueError('Неверный ключ хоста')
                 actor = self.server.session.join(
-                    first.get('name', ''), first.get('reconnect_token'))
+                    first.get('name', ''), first.get('reconnect_token'),
+                    first.get('version'))
             else:
                 raise ValueError('Неизвестная роль')
             self._send({'ok': True, 'actor': actor,
@@ -375,6 +453,13 @@ class _RequestHandler(socketserver.StreamRequestHandler):
                             raise ValueError('Наблюдатель не может торговать')
                         self.server.session.trade(actor, request)
                         result = self.server.session.state(is_admin, actor)
+                    elif kind == 'ready' and actor is not None:
+                        self.server.session.set_ready(actor,
+                                                      request.get('ready'))
+                        result = self.server.session.state(is_admin, actor)
+                    elif kind == 'remove_player' and is_admin:
+                        self.server.session.remove_player(request.get('actor'))
+                        result = self.server.session.state(True, actor)
                     elif kind == 'start' and is_admin:
                         self.server.session.start_or_continue()
                         result = self.server.session.state(True, actor)
@@ -539,7 +624,8 @@ class LanClient:
         token = reconnect_token or self._reconnect_tokens.get(cache_key)
         try:
             welcome = self.request({'type': 'join', 'role': role, 'name': name,
-                                    'key': key, 'reconnect_token': token})
+                                    'key': key, 'reconnect_token': token,
+                                    'version': APP_VERSION})
         except Exception:
             self.close()
             raise

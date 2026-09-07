@@ -115,6 +115,8 @@ class MultiplayerTests(unittest.TestCase):
                            case_hud=level.hud)
         buyer = game.join('Покупатель')
         other_student = game.join('Другой студент')
+        game.set_ready(buyer, True)
+        game.set_ready(other_student, True)
         game.start_or_continue()
         maker = game.market.fixed_owner
         self.assertGreaterEqual(maker, game.human_slots)
@@ -134,7 +136,8 @@ class MultiplayerTests(unittest.TestCase):
             self.assertEqual(room['name'], 'Семинар 7')
             self.assertEqual((room['players'], room['capacity'], room['bots']),
                              (0, 5, 2))
-            server.session.join('Участник')
+            actor = server.session.join('Участник')
+            server.session.set_ready(actor, True)
             server.session.start_or_continue()
             rooms = discover_games(timeout=.3, targets=('127.0.0.1',))
             self.assertFalse(any(value['port'] == server.address[1]
@@ -162,6 +165,8 @@ class MultiplayerTests(unittest.TestCase):
         duplicate.join('Алиса')
         with self.assertRaisesRegex(ValueError, 'занято'):
             duplicate.join('Алиса')
+        game.set_ready(alice, True)
+        game.set_ready(bob, True)
         game.start_or_continue()
         self.assertEqual(game._robots.actors, (2, 3))
         game.trade(alice, {'kind': 'bid', 'instrument': 0,
@@ -175,11 +180,30 @@ class MultiplayerTests(unittest.TestCase):
         self.assertEqual(game.phase, 'result')
         self.assertEqual(len(game.result), 4)
 
+    def test_lobby_requires_readiness_and_dashboard_tracks_disconnect(self):
+        scenario = read_par(ROOT / 'data/original/B01.PAR')
+        game = GameSession(scenario, human_slots=2, bots=0)
+        alice = game.join('Алиса', client_version='0.2.0')
+        bob = game.join('Борис', client_version='0.1.0')
+        game.set_ready(alice, True)
+        with self.assertRaisesRegex(ValueError, 'не все|Не все'):
+            game.start_or_continue()
+        state = game.state(True)
+        self.assertFalse(state['all_ready'])
+        self.assertEqual(state['versions'][str(bob)], '0.1.0')
+        game.set_ready(bob, True)
+        game.start_or_continue()
+        game.disconnect(bob)
+        game.remove_player(bob)
+        dashboard = game.state(True)['dashboard']
+        self.assertEqual([row['actor'] for row in dashboard], [alice])
+
     def test_started_session_requires_private_reconnect_token(self):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
         game = GameSession(scenario, human_slots=1, bots=0)
         actor = game.join('Алиса')
         token = game.reconnect_tokens[actor]
+        game.set_ready(actor, True)
         game.start_or_continue()
         game.disconnect(actor)
         with self.assertRaisesRegex(ValueError, 'ключ'):
@@ -192,6 +216,8 @@ class MultiplayerTests(unittest.TestCase):
         scenario = read_par(ROOT / 'data/original/B01.PAR')
         game = GameSession(scenario, human_slots=4, bots=0)
         actors = [game.join(f'Игрок {number}') for number in range(4)]
+        for actor in actors:
+            game.set_ready(actor, True)
         game.start_or_continue()
 
         def submit(pair):
@@ -218,6 +244,8 @@ class MultiplayerTests(unittest.TestCase):
                               key=server.admin_key)
             first = LanClient('127.0.0.1', port, name='Первый')
             second = LanClient('127.0.0.1', port, name='Второй')
+            first.request({'type': 'ready', 'ready': True})
+            second.request({'type': 'ready', 'ready': True})
             admin.request({'type': 'start'})
             with self.assertRaisesRegex(ValueError, 'Нет заявок'):
                 second.request({'type': 'trade', 'kind': 'sell',
@@ -267,6 +295,8 @@ class MultiplayerTests(unittest.TestCase):
                               key=server.admin_key)
             buyer = LanClient('127.0.0.1', port, name='Покупатель')
             seller = LanClient('127.0.0.1', port, name='Продавец')
+            buyer.request({'type': 'ready', 'ready': True})
+            seller.request({'type': 'ready', 'ready': True})
             admin.request({'type': 'start'})
             buyer.request({'type': 'trade', 'kind': 'bid', 'instrument': 0,
                            'price': 100, 'quantity': 1})

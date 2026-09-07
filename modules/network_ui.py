@@ -11,6 +11,8 @@ from .goals import draw_goals
 from .replay import draw_replay_frame
 from .report import draw_report
 from .sound import play_sound
+from .teacher_dashboard import (SORT_NAMES, dashboard_rows,
+                                draw_teacher_dashboard, export_dashboard)
 from .theme import (COLORS, back_button, card, draw_back_button,
                     draw_confirmation, draw_tooltip, font, label,
                     mouse_position, rounded)
@@ -55,6 +57,11 @@ def run_network_client(client, role='player', scale=1.0,
     confirm_exit = False
     confirm_choice = 1
     show_case_panel = bool(state.get('case_hud')) and not is_admin
+    dashboard_open = False
+    dashboard_selected = 0
+    dashboard_actor = None
+    dashboard_sort = 1
+    dashboard_notice = ''
     mouse = None
     last_action = (tuple(sorted(state['actions'][-1].items()))
                    if state.get('actions') else None)
@@ -111,7 +118,22 @@ def run_network_client(client, role='player', scale=1.0,
         return state['players'].get(str(owner), f'ID {owner + 1}')
 
     def draw(state):
-        nonlocal observed
+        nonlocal observed, dashboard_selected, dashboard_actor
+        if dashboard_open and is_admin:
+            sorted_rows = dashboard_rows(state, dashboard_sort)
+            if sorted_rows:
+                if not any(row['actor'] == dashboard_actor
+                           for row in sorted_rows):
+                    dashboard_actor = (observed if any(
+                        row['actor'] == observed for row in sorted_rows)
+                                       else sorted_rows[0]['actor'])
+                dashboard_selected = next(
+                    index for index, row in enumerate(sorted_rows)
+                    if row['actor'] == dashboard_actor)
+            _rows, dashboard_selected = draw_teacher_dashboard(
+                pg, screen, state, dashboard_selected, dashboard_sort,
+                (body, small, title), dashboard_notice)
+            return
         if goals_open and goals_data is not None:
             goal_actor = goals_data['actor']
             draw_goals(
@@ -174,20 +196,40 @@ def run_network_client(client, role='player', scale=1.0,
             write(f'Мест: {state["human_slots"]} · постоянных роботов: {state["bots"]}',
                   560, 150, COLORS['muted'], small)
             connected = set(state['connected'])
+            human_actors = set(state.get('human_actors', ()))
+            ready = set(state.get('ready', ()))
             humans = [(int(actor), name) for actor, name in state['players'].items()
-                      if not name.startswith('Робот ')]
+                      if int(actor) in human_actors and name != 'Удалён']
             for index, (actor, name) in enumerate(humans[:16]):
                 column, row = divmod(index, 8)
                 x = 72 + column * 416
                 y = 198 + row * 32
-                color = COLORS['accent_alt'] if actor in connected else COLORS['muted']
+                color = (COLORS['buy'] if actor in ready else
+                         COLORS['accent_alt'] if actor in connected else
+                         COLORS['muted'])
                 write(f'ID {actor + 1}  {name}'[:24], x, y,
                       COLORS['text'], small)
-                write('•' if actor in connected else '○', x + 360, y, color, body)
+                state_text = ('ГОТОВ' if actor in ready else
+                              'В СЕТИ' if actor in connected else 'НЕТ СВЯЗИ')
+                write(state_text, x + 280, y + 2, color, small)
+                version = state.get('versions', {}).get(str(actor), '?')
+                if version != state.get('server_version'):
+                    write(f'v{version}', x + 365, y + 2, COLORS['warning'], small)
+            if client.actor is not None:
+                own_ready = client.actor in ready
+                rounded(pg, screen, pg.Rect(64, 450, 210, 40),
+                        COLORS['buy'] if own_ready else COLORS['accent'], 8)
+                write('Готов ✓' if own_ready else 'Я готов', 120, 461,
+                      COLORS['white'], small)
             if is_admin:
-                write('Enter — начать игру', 64, 460, COLORS['accent'], body)
+                color = COLORS['accent'] if state.get('all_ready') else COLORS['muted']
+                write('Enter — начать игру' if state.get('all_ready') else
+                      'Запуск доступен, когда все готовы',
+                      304, 462, color, body)
+                write('F6 — панель преподавателя', 650, 466,
+                      COLORS['accent_alt'], small)
             else:
-                write('Ожидайте запуска преподавателем или хостом', 64, 460,
+                write('Enter — изменить готовность', 304, 462,
                       COLORS['muted'], body)
         else:
             card(pg, screen, pg.Rect(28, 96, 588, 386),
@@ -402,6 +444,11 @@ def run_network_client(client, role='player', scale=1.0,
                         confirm_choice = 1
                     else:
                         running = False
+                elif (position and state.get('phase') == 'lobby' and
+                      client.actor is not None and
+                      pg.Rect(64, 450, 210, 40).collidepoint(position)):
+                    send({'type': 'ready',
+                          'ready': client.actor not in set(state.get('ready', ()))})
                 continue
             if event.type != pg.KEYDOWN:
                 continue
@@ -419,6 +466,37 @@ def run_network_client(client, role='player', scale=1.0,
                     running = False
                 elif key in (pg.K_ESCAPE, pg.K_n):
                     confirm_exit = False
+                continue
+            if dashboard_open:
+                rows = dashboard_rows(state, dashboard_sort)
+                if key in (pg.K_ESCAPE, pg.K_F6):
+                    dashboard_open = False
+                    dashboard_notice = ''
+                elif key == pg.K_UP and rows:
+                    dashboard_selected = (dashboard_selected - 1) % len(rows)
+                    dashboard_actor = rows[dashboard_selected]['actor']
+                elif key == pg.K_DOWN and rows:
+                    dashboard_selected = (dashboard_selected + 1) % len(rows)
+                    dashboard_actor = rows[dashboard_selected]['actor']
+                elif key in (pg.K_LEFT, pg.K_RIGHT):
+                    dashboard_sort = ((dashboard_sort +
+                                       (1 if key == pg.K_RIGHT else -1)) %
+                                      len(SORT_NAMES))
+                elif key == pg.K_F3:
+                    path = export_dashboard(rows, default_report_folder())
+                    dashboard_notice = f'Сохранено: {path}'
+                elif key == pg.K_DELETE and rows:
+                    target = rows[dashboard_selected]
+                    if target['human'] and not target['connected']:
+                        send({'type': 'remove_player',
+                              'actor': target['actor']})
+                        dashboard_actor = None
+                    else:
+                        dashboard_notice = 'Удалить можно только отключившегося игрока'
+                elif key == pg.K_SPACE and state['phase'] in ('running', 'paused'):
+                    send({'type': 'pause'})
+                elif key == pg.K_e and state['phase'] in ('running', 'paused'):
+                    send({'type': 'end_period'})
                 continue
             if goals_open and goals_data is None:
                 if key in (pg.K_ESCAPE, pg.K_F4):
@@ -508,6 +586,14 @@ def run_network_client(client, role='player', scale=1.0,
                     confirm_choice = 1
                 else:
                     running = False
+            elif key == pg.K_F6 and is_admin:
+                dashboard_open = True
+                dashboard_actor = observed
+                dashboard_notice = ''
+            elif (state['phase'] == 'lobby' and client.actor is not None and
+                  ((not is_admin and key == pg.K_RETURN) or key == pg.K_r)):
+                send({'type': 'ready',
+                      'ready': client.actor not in set(state.get('ready', ()))})
             elif key == pg.K_F4 and state.get('goal_count'):
                 goals_actor = observed if is_admin else client.actor
                 goals_open = True

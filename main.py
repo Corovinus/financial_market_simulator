@@ -5,15 +5,20 @@ import logging
 from logging.handlers import RotatingFileHandler
 import os
 from pathlib import Path
+import queue
 import sys
+import threading
+import webbrowser
 
 from market.levels import CUSTOM_LEVELS, load_levels
+from market.version import APP_VERSION
 from modules.document import (document_lines, draw_document_line, load_sections,
                               page_scroll, table_of_contents)
 from modules.display import (handle_window_event, open_scaled_display,
                              present_scaled, resize_window,
                              toggle_fullscreen)
 from modules.preferences import get_preferences, set_preferences
+from modules.updater import check_for_update
 from modules.theme import (COLORS, apply_theme, card, draw_tooltip, font,
                            label, mouse_position, rounded)
 
@@ -139,6 +144,9 @@ def main():
     settings_editing = False
     hotkeys_back = 'settings'
     mouse = None
+    update_info = None
+    update_results = queue.SimpleQueue()
+    update_rect = pg.Rect(704, 28, 206, 38)
     setting_rows = (
         ('Тема', 'theme'), ('Размер шрифта', 'font_scale'),
         ('Звук', 'sound'), ('Масштаб окна', 'scale'),
@@ -148,6 +156,17 @@ def main():
 
     LOGGER.info('Application started: scale=%s speed=%s groups=%s',
                 get_preferences()['scale'], args.speed, len(GROUPS))
+
+    if not args.screenshot:
+        def find_update():
+            try:
+                update_results.put(check_for_update())
+            except Exception:
+                LOGGER.info('Update check unavailable', exc_info=True)
+                update_results.put(None)
+
+        threading.Thread(target=find_update, name='fast-update-check',
+                         daemon=True).start()
 
     def text(value, x, y, color=None, face=None):
         label(pg, screen, face or typeface, value, (x, y), color or COLORS['text'])
@@ -345,6 +364,9 @@ def main():
         nonlocal hotkeys_back, settings_editing
         if position is None:
             return
+        if mode == 'main' and update_info and update_rect.collidepoint(position):
+            webbrowser.open(update_info['url'])
+            return
         if mode != 'main' and back_button.collidepoint(position):
             go_back()
             return
@@ -410,6 +432,12 @@ def main():
                     return
 
     while running:
+        try:
+            checked_update = update_results.get_nowait()
+        except queue.Empty:
+            pass
+        else:
+            update_info = checked_update
         for event in pg.event.get():
             window, handled = handle_window_event(pg, event, screen, window)
             if handled:
@@ -531,7 +559,13 @@ def main():
         text('FAST', 48, 30, COLORS['accent'], heading)
         text('Финансовая торговая система', 150, 38, COLORS['text'], typeface)
         if mode == 'main':
-            text('Исследовательская версия', 720, 40, COLORS['muted'], small)
+            if update_info:
+                rounded(pg, screen, update_rect, COLORS['accent'], 8)
+                text(f'Доступна v{update_info["version"]} ↗',
+                     update_rect.x + 15, update_rect.y + 11,
+                     COLORS['white'], small)
+            else:
+                text(f'Версия {APP_VERSION}', 790, 40, COLORS['muted'], small)
         else:
             rounded(pg, screen, back_button, COLORS['background_alt'], 8)
             rounded(pg, screen, back_button, COLORS['border'], 8, 1)
@@ -692,7 +726,8 @@ def main():
                 ('Ctrl + / Ctrl −', 'масштаб окна'), ('↑ ↓ ← →', 'навигация'),
                 ('Enter', 'открыть или подтвердить'), ('Esc', 'назад / выход'),
                 ('B / S', 'купить / продать'), ('F9', 'оценка бумаги'),
-                ('F4', 'учебные цели'), ('R / F2', 'повтор / итоговый отчёт'),
+                ('F4 / F6', 'учебные цели / панель преподавателя'),
+                ('R / F2', 'повтор / итоговый отчёт'),
                 ('+ / −', 'скорость локальной сессии'),
             )
             for index, (keys, action) in enumerate(shortcuts):
@@ -711,6 +746,9 @@ def main():
         tooltip = None
         if mouse and mode != 'main' and back_button.collidepoint(mouse):
             tooltip = 'Вернуться на предыдущий экран'
+        elif (mouse and mode == 'main' and update_info and
+              update_rect.collidepoint(mouse)):
+            tooltip = 'Открыть страницу новой версии на GitHub'
         elif mouse and mode in ('main', 'items') and open_button.collidepoint(mouse):
             tooltip = 'Открыть выбранный пункт'
         elif mouse and mode == 'settings':
