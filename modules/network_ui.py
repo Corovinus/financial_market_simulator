@@ -316,6 +316,16 @@ def run_network_client(client, role='player', scale=1.0,
                 if (current_action != last_action and actions and
                         actions[-1].get('kind') in ('buy', 'sell')):
                     play_sound(pg, 'trade')
+                    action = actions[-1]
+                    if action.get('actor') == client.actor:
+                        column = 'ask' if action['kind'] == 'buy' else 'bid'
+                        selected_side = column
+                        quote = state['book'][action['instrument']][column]
+                        message(
+                            f'Сделка совершена · {column.capitalize()}: '
+                            + (f'{quote["price"]}.{quote["quantity"]:02d}'
+                               if quote else
+                               'заявка исполнена полностью'))
                 last_action = current_action
                 if (previous_phase in ('running', 'paused') and
                         state.get('phase') in ('result', 'finished')):
@@ -493,9 +503,9 @@ def run_network_client(client, role='player', scale=1.0,
                 elif key == pg.K_RIGHT:
                     selected_side = 'ask'
                 elif key == pg.K_b:
-                    input_mode, input_text = 'buy', ''
+                    selected_side, input_mode, input_text = 'ask', 'buy', ''
                 elif key == pg.K_s:
-                    input_mode, input_text = 'sell', ''
+                    selected_side, input_mode, input_text = 'bid', 'sell', ''
                 elif key == pg.K_F9 and state.get('hints'):
                     show_hints = not show_hints
                 elif event.unicode and event.unicode.isdigit():

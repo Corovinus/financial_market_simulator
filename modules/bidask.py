@@ -321,9 +321,9 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                         LOGGER.info('Quote selected via mouse: instrument=%s side=%s',
                                     selected_instrument, selected_side)
                     elif buy_button.collidepoint(position):
-                        input_mode, input_text = 'buy', ''
+                        selected_side, input_mode, input_text = 'ask', 'buy', ''
                     elif sell_button.collidepoint(position):
-                        input_mode, input_text = 'sell', ''
+                        selected_side, input_mode, input_text = 'bid', 'sell', ''
                 continue
             if event.type != pg.KEYDOWN:
                 continue
@@ -427,9 +427,19 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
                             message('Заявка принята')
                         else:
                             quantity = int(input_text)
-                            market.take(0, selected_instrument, input_mode, quantity)
+                            trade_side = input_mode
+                            market.take(0, selected_instrument, trade_side, quantity)
+                            selected_side = ('ask' if trade_side == 'buy'
+                                             else 'bid')
+                            remainder = market.book.best(
+                                selected_instrument, selected_side)
                             play_sound(pg, 'trade')
-                            message('Сделка совершена')
+                            column = selected_side.capitalize()
+                            message(
+                                f'Сделка совершена · {column}: '
+                                + (f'{remainder.price}.{remainder.quantity:02d}'
+                                   if remainder else
+                                   'заявка исполнена полностью'))
                         input_mode, input_text = None, ''
                     except (ValueError, OrderError) as error:
                         message(str(error), 3)
@@ -448,9 +458,9 @@ def run_session(scenario: Scenario | str | Path, speed: float = 1.0,
             elif key == pg.K_RIGHT:
                 selected_side = 'ask'
             elif key == pg.K_b:
-                input_mode, input_text = 'buy', ''
+                selected_side, input_mode, input_text = 'ask', 'buy', ''
             elif key == pg.K_s:
-                input_mode, input_text = 'sell', ''
+                selected_side, input_mode, input_text = 'bid', 'sell', ''
             elif key == pg.K_F9 and scenario.hints:
                 show_hints = not show_hints
                 message('F9 — цены будущих выплат' if show_hints else 'F9 — цены скрыты')
